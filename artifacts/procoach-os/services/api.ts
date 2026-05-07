@@ -9,9 +9,9 @@ import Constants from "expo-constants";
 
 // Prioriza a URL fornecida via variável de ambiente (ex: .env)
 // No Expo, use EXPO_PUBLIC_API_URL para o ambiente de produção
-const API_URL = process.env.EXPO_PUBLIC_API_URL;
+const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "https://coach-pro-v8e4.onrender.com";
 
-if (!API_URL) {
+if (!process.env.EXPO_PUBLIC_API_URL) {
   console.warn("[ALERTA TÁTICO] EXPO_PUBLIC_API_URL não definida. As requisições podem falhar ou usar o endereço incorreto.");
 }
 

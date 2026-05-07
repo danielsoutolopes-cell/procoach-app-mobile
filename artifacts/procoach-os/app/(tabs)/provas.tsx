@@ -53,7 +53,7 @@ import {
   notificationsSupported,
 } from "@/utils/notifications";
 
-const API_BASE = process.env.EXPO_PUBLIC_API_URL;
+const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? "https://coach-pro-v8e4.onrender.com";
 
 const DISTANCES = [5, 10, 21, 42];
 const PRIORITIES: RacePriority[] = ["P1", "P2", "P3"];

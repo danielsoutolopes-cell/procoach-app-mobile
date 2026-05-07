@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json", // Estende a configuração base do monorepo
+  "compilerOptions": {
+    "composite": true, // Essencial para referências de projeto em monorepos
+    "outDir": "dist", // Onde os arquivos compilados serão gerados
+    "rootDir": "src", // Onde os arquivos fonte TypeScript estão
+    "strict": true, // Habilita todas as opções estritas de verificação de tipo
+    "declaration": true, // Gera arquivos .d.ts para consumo por outros pacotes
+    "declarationMap": true, // Gera sourcemaps para os arquivos .d.ts (útil para depuração)
+    "module": "NodeNext", // Usa o sistema de módulos moderno do Node.js (compatível com bundlers)
+    "moduleResolution": "NodeNext", // Resolução de módulos moderna
+    "target": "ES2022", // Compila para uma versão moderna do JavaScript
+    "esModuleInterop": true, // Permite importações padrão de módulos CommonJS
+    "types": ["node"],
+    "forceConsistentCasingInFileNames": true, // Garante consistência no uso de maiúsculas/minúsculas em nomes de arquivos
+    "skipLibCheck": true // Ignora a verificação de tipo de arquivos de declaração de bibliotecas (acelera a compilação)
+  },
+  "include": ["src"], // Inclui apenas os arquivos na pasta src
+  "exclude": ["node_modules", "dist"] // Exclui node_modules e a pasta de saída
+}

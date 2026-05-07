@@ -1,0 +1,26 @@
+name: procoach_os_v5
+description: Ecossistema de Alta Performance e Longevidade Articular.
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # Fontes modernas para o estilo Dark Mode
+  google_fonts: ^6.1.0
+  # Gerenciamento de requisições HTTP para o backend FastAPI
+  http: ^1.1.0
+  # Formatação de datas e números (Essencial para Provas e KM)
+  intl: ^0.19.0
+  # Icones extras
+  cupertino_icons: ^1.0.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true

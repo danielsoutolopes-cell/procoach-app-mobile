@@ -1,0 +1,13 @@
+uploads = []
+
+[[generated]]
+id = "mLwqJ6wZ7ecDlP7DDKKaq"
+uri = "file://artifacts/procoach-os/assets/images/icon.png"
+type = "image"
+title = "procoach-os-app-icon"
+
+[[outputs]]
+id = "BIM5khs-aI_viyczKifQo"
+uri = "file://artifacts/procoach-os/assets/images/icon.png"
+type = "image"
+title = "PROCOACH OS — App Icon"

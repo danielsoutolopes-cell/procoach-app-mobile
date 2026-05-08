@@ -143,6 +143,7 @@ const STORAGE_KEY = "@procoach_v51_state_v4";
 const AI_WORKOUT_DATE_KEY = "@procoach_ai_workout_date_v2";
 const AI_WORKOUT_CACHE_KEY = "@procoach_ai_workout_cache_v1";
 const RECOVERY_BLOCK_KEY = "@procoach_recovery_block_v1";
+const COMPLETED_WORKOUT_DAYS_KEY = "@procoach_completed_workout_days_v1";
 
 async function fetchAIWorkout(opts: {
   deviceId: string;
@@ -192,11 +193,12 @@ export function AthleteProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       let localState = DEFAULT_STATE;
-      const [raw, cachedWorkoutRaw, lastAIDate, recoveryRaw] = await Promise.all([
+      const [raw, cachedWorkoutRaw, lastAIDate, recoveryRaw, completedDaysRaw] = await Promise.all([
         AsyncStorage.getItem(STORAGE_KEY),
         AsyncStorage.getItem(AI_WORKOUT_CACHE_KEY),
         AsyncStorage.getItem(AI_WORKOUT_DATE_KEY),
         AsyncStorage.getItem(RECOVERY_BLOCK_KEY),
+        AsyncStorage.getItem(COMPLETED_WORKOUT_DAYS_KEY),
       ]);
       if (raw) {
         try {
@@ -213,6 +215,19 @@ export function AthleteProvider({ children }: { children: React.ReactNode }) {
       }
       // Restore cached AI workout if present (survives reloads while AI was in-flight)
       const todayStr = new Date().toDateString();
+      const todayKey = new Date().toISOString().slice(0, 10);
+      const completedDays: string[] = (() => {
+        try {
+          const parsed = completedDaysRaw ? JSON.parse(completedDaysRaw) : [];
+          return Array.isArray(parsed) ? parsed.filter((v) => typeof v === "string") : [];
+        } catch {
+          return [];
+        }
+      })();
+      const completedToday = completedDays.includes(todayKey);
+      if (completedToday) {
+        localState = { ...localState, todayWorkout: { ...localState.todayWorkout, completed: true } };
+      }
       const cachedWorkout: DailyWorkout | null = (() => {
         try { return cachedWorkoutRaw ? JSON.parse(cachedWorkoutRaw) : null; } catch { return null; }
       })();
@@ -442,8 +457,26 @@ export function AthleteProvider({ children }: { children: React.ReactNode }) {
 
   const markWorkoutComplete = useCallback(async () => {
     const roundedKm = formatDistance(state.todayWorkout.distanceKm);
+    const todayKey = new Date().toISOString().slice(0, 10);
+    try {
+      const existingRaw = await AsyncStorage.getItem(COMPLETED_WORKOUT_DAYS_KEY);
+      const existing = (() => {
+        try {
+          const parsed = existingRaw ? JSON.parse(existingRaw) : [];
+          return Array.isArray(parsed) ? parsed.filter((v) => typeof v === "string") : [];
+        } catch {
+          return [];
+        }
+      })();
+      if (!existing.includes(todayKey)) {
+        await AsyncStorage.setItem(
+          COMPLETED_WORKOUT_DAYS_KEY,
+          JSON.stringify([todayKey, ...existing].slice(0, 60)),
+        );
+      }
+    } catch {}
     const entry: CompletedEntry = {
-      date: new Date().toISOString(),
+      date: todayKey,
       distanceKm: roundedKm,
       type: state.todayWorkout.type,
       durationMin: state.todayWorkout.durationMin,
@@ -555,13 +588,13 @@ export function AthleteProvider({ children }: { children: React.ReactNode }) {
           painLevel: pain,
           targetRaceDistanceKm: state.profile.targetRaceDistanceKm,
           targetRaceDate: state.profile.targetRaceDate,
-          currentWorkoutCompleted: false,
+          currentWorkoutCompleted: state.todayWorkout.completed,
         });
         if (aiWorkout) {
           await AsyncStorage.setItem(AI_WORKOUT_DATE_KEY, todayStr);
           await AsyncStorage.setItem(AI_WORKOUT_CACHE_KEY, JSON.stringify(aiWorkout));
           setState((prev) => {
-            const next = { ...prev, hrv, painLevel: pain, lastCheckInDate: todayStr, aiLoading: false, todayWorkout: { ...aiWorkout, completed: false } };
+            const next = { ...prev, hrv, painLevel: pain, lastCheckInDate: todayStr, aiLoading: false, todayWorkout: { ...aiWorkout, completed: prev.todayWorkout.completed } };
             AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
             return next;
           });

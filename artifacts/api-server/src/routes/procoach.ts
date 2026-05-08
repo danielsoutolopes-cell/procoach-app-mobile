@@ -14,6 +14,14 @@ function roundKm(val: number): number {
   return Math.round(val);
 }
 
+function normalizeEntryDate(raw: string): string {
+  if (typeof raw !== "string") return new Date().toISOString().slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+  return new Date().toISOString().slice(0, 10);
+}
+
 router.post("/procoach/athletes/sync", async (req: Request, res: Response) => {
   // Validação em tempo de execução com Zod
   const parseResult = insertAthleteSchema.safeParse(req.body);
@@ -106,12 +114,23 @@ router.post("/procoach/athletes/:deviceId/workouts", async (req: Request, res: R
 
   const athleteId = athletes[0]!.id;
   const roundedKm = roundKm(distanceKm);
+  const entryDate = normalizeEntryDate(date);
+
+  const existingEntry = await db
+    .select()
+    .from(workoutEntriesTable)
+    .where(and(eq(workoutEntriesTable.athleteId, athleteId), eq(workoutEntriesTable.entryDate, entryDate)) as any)
+    .limit(1);
+  if (existingEntry[0]) {
+    res.json({ entry: existingEntry[0] });
+    return;
+  }
 
   const [entry] = await db
     .insert(workoutEntriesTable)
     .values({
       athleteId,
-      entryDate: date,
+      entryDate,
       distanceKm: roundedKm,
       type: type as any,
       durationMin,

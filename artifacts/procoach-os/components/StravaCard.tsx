@@ -19,7 +19,7 @@ import { ProCoachAPI } from "@/services/api";
 interface StravaStatus {
   connected: boolean;
   lastSyncAt: string | null;
-  stravaAthleteId?: number;
+  configured?: boolean;
 }
 
 interface Props {
@@ -64,8 +64,8 @@ export function StravaCard({ onSyncComplete }: Props) {
   const handleConnect = useCallback(async () => {
     if (!deviceId) return;
     setConnecting(true);
-    const url = ProCoachAPI.stravaConnectUrl(deviceId);
     try {
+      const url = await ProCoachAPI.stravaConnectUrl(deviceId);
       if (Platform.OS === "web") {
         window.open(url, "_blank", "width=600,height=700");
         let attempts = 0;
@@ -218,7 +218,7 @@ export function StravaCard({ onSyncComplete }: Props) {
           <Text style={s.title}>STRAVA</Text>
           <Text style={s.subtitle}>
             {status?.connected
-              ? `ID: ${status.stravaAthleteId}`
+              ? "CONECTADO AO STRAVA"
               : "IMPORTAR TREINOS REAIS"}
           </Text>
         </View>

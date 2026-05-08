@@ -45,6 +45,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "56bc50d8-fc7d-4cc5-96a6-2d19d3ffb0eb"
+      }
+    },
+    "owner": "danielsoutolopes"
   }
 }

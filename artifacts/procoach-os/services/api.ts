@@ -164,27 +164,30 @@ export const ProCoachAPI = {
 
   // --- INTEGRAÇÃO STRAVA ---
   async stravaStatus(deviceId: string) {
-    return request<{ connected: boolean; lastSyncAt: string | null; stravaAthleteId?: number }>(
-      `/strava/status?deviceId=${encodeURIComponent(deviceId)}`
+    return request<{ connected: boolean; configured: boolean; lastSyncAt: string | null }>(
+      `/strava/status-device?deviceId=${encodeURIComponent(deviceId)}`
     );
   },
 
   async stravaSync(deviceId: string) {
-    return request<{ imported: number; total: number }>("/strava/sync", {
+    return request<{ imported: number; synced: boolean }>("/strava/sync-device", {
       method: "POST",
       body: JSON.stringify({ deviceId }),
     });
   },
 
   async stravaDisconnect(deviceId: string) {
-    return request<{ disconnected: boolean }>("/strava/disconnect", {
+    return request<{ disconnected: boolean }>("/strava/disconnect-device", {
       method: "POST",
       body: JSON.stringify({ deviceId }),
     });
   },
 
-  stravaConnectUrl(deviceId: string): string {
-    return `${BASE}/strava/connect?deviceId=${encodeURIComponent(deviceId)}`;
+  async stravaConnectUrl(deviceId: string): Promise<string> {
+    const res = await request<{ url: string }> (
+      `/strava/connect-url?deviceId=${encodeURIComponent(deviceId)}`
+    );
+    return res.url;
   },
 
   // --- NOTIFICAÇÕES TÁTICAS ---

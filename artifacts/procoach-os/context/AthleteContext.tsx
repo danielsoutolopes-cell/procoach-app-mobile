@@ -185,16 +185,12 @@ export function AthleteProvider({ children }: { children: React.ReactNode }) {
   const mountedRef = React.useRef(true);
 
   function mergeRemoteAthlete(local: AthleteState, remote: any): AthleteState {
-    // O backend deve ser a fonte de verdade para a Prova Alvo (P1) e a semana atual.
-    // Isso evita que um estado local "zerado" (ex: AsyncStorage limpo) sobrescreva a prova no servidor
-    // quando o atleta já existe.
     const nextProfile: AthleteProfile = {
       ...local.profile,
       name: remote?.name ?? local.profile.name,
       targetRaceName: remote?.targetRaceName ?? local.profile.targetRaceName,
       targetRaceDate: remote?.targetRaceDate ?? local.profile.targetRaceDate,
       targetRaceDistanceKm: remote?.targetRaceDistanceKm ?? local.profile.targetRaceDistanceKm,
-      // "races" ainda é local (não persistido no backend), então preservamos o que existe no aparelho.
       races: local.profile.races ?? [],
     };
 
@@ -263,9 +259,6 @@ export function AthleteProvider({ children }: { children: React.ReactNode }) {
         if (!mountedRef.current) return;
         setDeviceId(deviceId);
 
-        // IMPORTANTE:
-        // Antes de "subir" o estado local, tenta carregar o atleta do backend.
-        // Se o atleta já existir lá, evitamos sobrescrever o targetRace* com defaults.
         let remoteAthlete: any | null = null;
         try {
           const remoteRes = await ProCoachAPI.getAthlete(deviceId);

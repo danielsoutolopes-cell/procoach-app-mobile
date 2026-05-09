@@ -33,6 +33,7 @@ app.get("/", (_req, res) => {
   res.status(200).json({ status: "ok" });
 });
 
+app.use(router);
 app.use("/api", router);
 
 export default app;

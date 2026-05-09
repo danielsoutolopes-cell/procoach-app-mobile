@@ -61,16 +61,55 @@ function getHRVStatus(hrv: number): { label: string; color: string; detail: stri
 const HOUR_OPTIONS = Array.from({ length: 16 }, (_, i) => i + 6); // 06h–21h
 
 function getSaoPauloDayKey(): string {
-  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+  // Evita `new Date(toLocaleString(...))`, que pode virar "Invalid Date" em alguns Androids.
+  // Aqui geramos sempre YYYY-MM-DD a partir de `formatToParts`.
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+
+  const year = parts.find((p) => p.type === "year")?.value ?? "1970";
+  const month = parts.find((p) => p.type === "month")?.value ?? "01";
+  const day = parts.find((p) => p.type === "day")?.value ?? "01";
+  return `${year}-${month}-${day}`;
 }
 
 function getSaoPauloWeekStartKey(): string {
-  const nowSp = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
-  const day = nowSp.getDay();
-  const daysSinceMonday = (day + 6) % 7;
-  const start = new Date(nowSp);
-  start.setDate(nowSp.getDate() - daysSinceMonday);
-  return start.toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+  // Em alguns Androids, `new Date(new Date().toLocaleString(...))` falha no parse e vira Invalid Date.
+  // Para ser robusto: pegamos a data atual em São Paulo via Intl e calculamos a segunda-feira da semana.
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+
+  const year = Number(parts.find((p) => p.type === "year")?.value ?? "1970");
+  const month = Number(parts.find((p) => p.type === "month")?.value ?? "1");
+  const day = Number(parts.find((p) => p.type === "day")?.value ?? "1");
+
+  const weekdayShort = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Sao_Paulo",
+    weekday: "short",
+  }).format(new Date());
+
+  const weekdayMap: Record<string, number> = {
+    Mon: 0,
+    Tue: 1,
+    Wed: 2,
+    Thu: 3,
+    Fri: 4,
+    Sat: 5,
+    Sun: 6,
+  };
+  const daysSinceMonday = weekdayMap[weekdayShort] ?? 0;
+
+  // Usa UTC só para fazer aritmética de datas de calendário (YYYY-MM-DD).
+  const baseUtc = new Date(Date.UTC(year, month - 1, day));
+  baseUtc.setUTCDate(baseUtc.getUTCDate() - daysSinceMonday);
+  return baseUtc.toISOString().slice(0, 10);
 }
 
 export default function CheckInScreen() {

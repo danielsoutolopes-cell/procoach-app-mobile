@@ -362,9 +362,8 @@ interface StravaResult {
   achievements?: number;
 }
 
-function StravaSection({ race, deviceId, colors }: {
+function StravaSection({ race, colors }: {
   race: Race;
-  deviceId: string;
   colors: ReturnType<typeof import("@/hooks/useColors").useColors>;
 }) {
   const [connected, setConnected] = useState<boolean | null>(null);
@@ -380,13 +379,13 @@ function StravaSection({ race, deviceId, colors }: {
 
   const checkStatus = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/strava/status-device?deviceId=${encodeURIComponent(deviceId)}`);
+      const res = await fetch(`${API_BASE}/api/strava/status-device`);
       if (!res.ok) return;
       const data = await res.json() as { connected: boolean; configured?: boolean };
       setConnected(data.connected);
       if (data.configured !== undefined) setConfigured(data.configured);
     } catch { /* ignore */ }
-  }, [deviceId]);
+  }, []);
 
   useEffect(() => { checkStatus(); }, [checkStatus]);
 
@@ -397,7 +396,7 @@ function StravaSection({ race, deviceId, colors }: {
   const handleConnect = useCallback(async () => {
     setConnecting(true);
     try {
-      const res = await fetch(`${API_BASE}/api/strava/connect-url?deviceId=${encodeURIComponent(deviceId)}`);
+      const res = await fetch(`${API_BASE}/api/strava/connect-url`);
       const data = await res.json() as { url?: string; error?: string };
       if (!data.url) {
         Alert.alert("Strava não configurado", data.error ?? "Adicione STRAVA_CLIENT_ID e STRAVA_CLIENT_SECRET no servidor.");
@@ -416,7 +415,7 @@ function StravaSection({ race, deviceId, colors }: {
     } finally {
       setConnecting(false);
     }
-  }, [deviceId, checkStatus, stopPoll]);
+  }, [checkStatus, stopPoll]);
 
   useEffect(() => () => stopPoll(), [stopPoll]);
 
@@ -426,7 +425,7 @@ function StravaSection({ race, deviceId, colors }: {
       const res = await fetch(`${API_BASE}/api/strava/sync-device`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ deviceId, raceDate: raceDateOnly }),
+        body: JSON.stringify({ raceDate: raceDateOnly }),
       });
       const data = await res.json() as { imported?: number };
       Alert.alert("Strava sincronizado", `${data.imported ?? 0} atividade(s) importada(s).`);
@@ -435,7 +434,7 @@ function StravaSection({ race, deviceId, colors }: {
     } finally {
       setSyncing(false);
     }
-  }, [deviceId, raceDateOnly]);
+  }, [raceDateOnly]);
 
   const handleFetchResult = useCallback(async () => {
     setResultLoading(true);
@@ -443,7 +442,7 @@ function StravaSection({ race, deviceId, colors }: {
       const res = await fetch(`${API_BASE}/api/strava/race-result`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ deviceId, raceDate: raceDateOnly, distanceKm: race.distanceKm }),
+        body: JSON.stringify({ raceDate: raceDateOnly, distanceKm: race.distanceKm }),
       });
       const data = await res.json() as StravaResult;
       setResult(data);
@@ -453,7 +452,7 @@ function StravaSection({ race, deviceId, colors }: {
     } finally {
       setResultLoading(false);
     }
-  }, [deviceId, raceDateOnly, race.distanceKm]);
+  }, [raceDateOnly, race.distanceKm]);
 
   const handleDisconnect = useCallback(() => {
     Alert.alert("Desconectar Strava?", "Você poderá reconectar quando quiser.", [
@@ -462,14 +461,14 @@ function StravaSection({ race, deviceId, colors }: {
         text: "Desconectar", style: "destructive", onPress: async () => {
           await fetch(`${API_BASE}/api/strava/disconnect-device`, {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ deviceId }),
+            body: JSON.stringify({}),
           });
           setConnected(false);
           setResult(null);
         }
       }
     ]);
-  }, [deviceId]);
+  }, []);
 
   if (!configured && connected === false) {
     return (
@@ -633,7 +632,7 @@ function StravaSection({ race, deviceId, colors }: {
 export default function ProvasScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { state, deviceId, updateProfile, setCurrentWeek } = useAthlete();
+  const { state, updateProfile, setCurrentWeek } = useAthlete();
   const { profile, currentWeek } = state;
 
   const [editing, setEditing] = useState(false);
@@ -662,11 +661,27 @@ export default function ProvasScreen() {
     return stored;
   }, [profile]);
 
-  const p1Race = races.find((r) => r.priority === "P1") ?? races[0];
+  const futureRaces = useMemo(() => {
+    return [...races]
+      .filter((r) => getDaysUntilRace(r.date) >= 0)
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  }, [races]);
+
+  const nextRace = futureRaces[0] ?? [...races].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
+
+  const p1Race = useMemo(() => {
+    const nextP1 = futureRaces.find((r) => r.priority === "P1");
+    if (nextP1) return nextP1;
+    const anyP1 = races.find((r) => r.priority === "P1");
+    return anyP1 ?? races[0];
+  }, [futureRaces, races]);
 
   // Races within 2 days → show logistics
   const upcomingRaces = useMemo(
-    () => races.filter((r) => getDaysUntilRace(r.date) <= 2),
+    () => races.filter((r) => {
+      const d = getDaysUntilRace(r.date);
+      return d >= 0 && d <= 2;
+    }),
     [races]
   );
 
@@ -930,7 +945,12 @@ export default function ProvasScreen() {
     <View style={s.container}>
       <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
         <Text style={s.pageTitle}>CALENDÁRIO DE PROVAS</Text>
-        <Text style={s.pageSubtitle}>Prova Alvo (P1)</Text>
+        <Text style={s.pageSubtitle}>
+          Próxima prova: {nextRace ? `${nextRace.name} · ${nextRace.priority} · ${formatDateBR(nextRace.date)}` : "—"}
+        </Text>
+        <Text style={s.pageSubtitle}>
+          Próxima P1 (alvo): {p1Race ? `${p1Race.name} · ${formatDateBR(p1Race.date)}` : "—"}
+        </Text>
 
         {/* ── PRE-RACE LOGISTICS (≤2 days) ──────────── */}
         {upcomingRaces.length > 0 && (
@@ -944,7 +964,7 @@ export default function ProvasScreen() {
                   colors={colors}
                   onGeneratePDF={handleGenerateLogisticsPDF}
                 />
-                {deviceId && <StravaSection race={race} deviceId={deviceId} colors={colors} />}
+                {(!p1Race || race.id !== p1Race.id) && <StravaSection race={race} colors={colors} />}
               </React.Fragment>
             ))}
           </>
@@ -1002,8 +1022,8 @@ export default function ProvasScreen() {
         )}
 
         {/* ── STRAVA (P1 post-race or always) ──────── */}
-        {p1Race && deviceId && (
-          <StravaSection race={p1Race} deviceId={deviceId} colors={colors} />
+        {p1Race && (
+          <StravaSection race={p1Race} colors={colors} />
         )}
 
         {/* ── ACTION BUTTONS ────────────────────────── */}

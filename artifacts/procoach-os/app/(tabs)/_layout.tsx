@@ -23,6 +23,10 @@ function NativeTabLayout() {
         <Icon sf={{ default: "trophy", selected: "trophy.fill" }} />
         <Label>Provas</Label>
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="proximo-treino">
+        <Icon sf={{ default: "clock", selected: "clock.fill" }} />
+        <Label>Próximo</Label>
+      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="historico">
         <Icon sf={{ default: "chart.bar.fill", selected: "chart.bar.fill" }} />
         <Label>Histórico</Label>
@@ -97,6 +101,15 @@ function ClassicTabLayout() {
           title: "PROVAS",
           tabBarIcon: ({ color }) => (
             <Feather name="award" size={20} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="proximo-treino"
+        options={{
+          title: "PRÓXIMO",
+          tabBarIcon: ({ color }) => (
+            <Feather name="clock" size={20} color={color} />
           ),
         }}
       />

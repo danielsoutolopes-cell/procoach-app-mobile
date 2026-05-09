@@ -76,7 +76,7 @@ function getSaoPauloWeekStartKey(): string {
 export default function CheckInScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { state, submitDailyCheckIn, updateProfile, deviceId } = useAthlete();
+  const { state, submitDailyCheckIn, updateProfile } = useAthlete();
   const { hrv, painLevel, profile, lastCheckInDate, aiLoading, currentWeek } = state;
 
   const todayStr = new Date().toDateString();
@@ -134,9 +134,8 @@ export default function CheckInScreen() {
   }, []);
 
   useEffect(() => {
-    if (!deviceId) return;
     setGelLoading(true);
-    ProCoachAPI.getGelStock(deviceId)
+    ProCoachAPI.getGelStock()
       .then((r) => {
         const v = Math.max(0, Math.round(r.gelsInStock ?? 0));
         setGelStock(v);
@@ -144,39 +143,37 @@ export default function CheckInScreen() {
       })
       .catch(() => {})
       .finally(() => setGelLoading(false));
-  }, [deviceId]);
+  }, []);
 
   const refreshCompliance = useCallback(async () => {
-    if (!deviceId) return;
     setComplianceLoading(true);
     try {
       const from = getSaoPauloWeekStartKey();
       const to = getSaoPauloDayKey();
-      const r = await ProCoachAPI.getCompliance(deviceId, { from, to });
+      const r = await ProCoachAPI.getCompliance({ from, to });
       setCompliance(r);
     } catch {
       setCompliance(null);
     } finally {
       setComplianceLoading(false);
     }
-  }, [deviceId]);
+  }, []);
 
   useEffect(() => {
     refreshCompliance();
   }, [refreshCompliance]);
 
   const refreshBio = useCallback(async () => {
-    if (!deviceId) return;
     setBioLoading(true);
     try {
-      const r = await ProCoachAPI.getBioimpedance(deviceId, 7);
+      const r = await ProCoachAPI.getBioimpedance(7);
       setBioEntries(Array.isArray(r.entries) ? r.entries : []);
     } catch {
       setBioEntries([]);
     } finally {
       setBioLoading(false);
     }
-  }, [deviceId]);
+  }, []);
 
   useEffect(() => {
     refreshBio();
@@ -241,10 +238,9 @@ export default function CheckInScreen() {
   };
 
   const handleSaveGelStock = async () => {
-    if (!deviceId) return;
     setGelSaving(true);
     try {
-      const r = await ProCoachAPI.setGelStock(deviceId, gelStock);
+      const r = await ProCoachAPI.setGelStock(gelStock);
       const v = Math.max(0, Math.round(r.gelsInStock ?? 0));
       setGelStock(v);
       setGelStockText(String(v));
@@ -256,10 +252,6 @@ export default function CheckInScreen() {
   };
 
   const handleImportPlan = async () => {
-    if (!deviceId) {
-      Alert.alert("Erro", "deviceId não encontrado. Feche e abra o app novamente.");
-      return;
-    }
     const raw = planJsonText.trim();
     if (!raw) {
       Alert.alert("Faltou o JSON", "Cole o JSON do plano aqui antes de importar.");
@@ -275,7 +267,7 @@ export default function CheckInScreen() {
         Alert.alert("JSON inválido", "Não encontrei 'cronograma' no JSON. Cole o JSON completo do plano.");
         return;
       }
-      const result = await ProCoachAPI.importPlanJson(deviceId, parsed);
+      const result = await ProCoachAPI.importPlanJson(parsed);
       setPlanImportResult(`Importado: ${result.imported} treinos (${result.firstDate} → ${result.lastDate})`);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (e: any) {
@@ -286,15 +278,11 @@ export default function CheckInScreen() {
   };
 
   const handleCheckPlan = async () => {
-    if (!deviceId) {
-      Alert.alert("Erro", "deviceId não encontrado. Feche e abra o app novamente.");
-      return;
-    }
     setPlanChecking(true);
     try {
       const from = getSaoPauloDayKey();
       const to = state.profile.targetRaceDate?.slice(0, 10) || undefined;
-      const res = await ProCoachAPI.getPlan(deviceId, { from, to });
+      const res = await ProCoachAPI.getPlan({ from, to });
       const normalized = (res.sessions ?? []).map((s) => ({
         date: s.session_date,
         activity: s.activity,
@@ -313,10 +301,6 @@ export default function CheckInScreen() {
   };
 
   const handleSaveBio = async () => {
-    if (!deviceId) {
-      Alert.alert("Erro", "deviceId não encontrado. Feche e abra o app novamente.");
-      return;
-    }
     const raw = bioJsonText.trim();
     if (!raw) {
       Alert.alert("Faltou o JSON", "Cole o JSON da bioimpedância aqui antes de salvar.");
@@ -330,7 +314,7 @@ export default function CheckInScreen() {
         Alert.alert("JSON inválido", "Faltou o campo 'date' (ex.: 2026-05-08).");
         return;
       }
-      await ProCoachAPI.upsertBioimpedance(deviceId, parsed);
+      await ProCoachAPI.upsertBioimpedance(parsed);
       setBioResult("Bioimpedância salva no Neon.");
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       await refreshBio();
@@ -783,7 +767,7 @@ export default function CheckInScreen() {
         <View style={s.card}>
           <View style={s.cardTitleRow}>
             <Text style={s.cardTitle}>COMPLIANCE DA SEMANA</Text>
-            <Pressable onPress={refreshCompliance} disabled={complianceLoading || !deviceId}>
+            <Pressable onPress={refreshCompliance} disabled={complianceLoading}>
               {complianceLoading ? (
                 <ActivityIndicator size="small" color={colors.mutedForeground} />
               ) : (
@@ -815,7 +799,7 @@ export default function CheckInScreen() {
             </>
           ) : (
             <Text style={{ fontSize: 12, color: colors.mutedForeground, lineHeight: 16 }}>
-              {deviceId ? "Sem dados ainda. Importe o plano e marque treinos como concluídos." : "Abra o app novamente para gerar o deviceId."}
+              Sem dados ainda. Importe o plano e marque treinos como concluídos.
             </Text>
           )}
         </View>
@@ -823,7 +807,7 @@ export default function CheckInScreen() {
         <View style={s.card}>
           <View style={s.cardTitleRow}>
             <Text style={s.cardTitle}>BIOIMPEDÂNCIA (V5.2)</Text>
-            <Pressable onPress={refreshBio} disabled={bioLoading || !deviceId}>
+            <Pressable onPress={refreshBio} disabled={bioLoading}>
               {bioLoading ? (
                 <ActivityIndicator size="small" color={colors.mutedForeground} />
               ) : (
@@ -858,7 +842,7 @@ export default function CheckInScreen() {
             </>
           ) : (
             <Text style={{ fontSize: 12, color: colors.mutedForeground, lineHeight: 16 }}>
-              {deviceId ? "Sem registros ainda. Cole o JSON abaixo para salvar." : "Abra o app novamente para gerar o deviceId."}
+              Sem registros ainda. Cole o JSON abaixo para salvar.
             </Text>
           )}
 
@@ -879,7 +863,7 @@ export default function CheckInScreen() {
               { opacity: pressed ? 0.7 : 1, backgroundColor: bioSaving ? colors.border : colors.primary },
             ]}
             onPress={handleSaveBio}
-            disabled={bioSaving || !deviceId}
+            disabled={bioSaving}
           >
             {bioSaving ? (
               <ActivityIndicator size="small" color={colors.mutedForeground} />
@@ -932,7 +916,7 @@ export default function CheckInScreen() {
                 { opacity: pressed ? 0.7 : 1, backgroundColor: gelSaving ? colors.border : colors.primary },
               ]}
               onPress={handleSaveGelStock}
-              disabled={gelSaving || !deviceId}
+              disabled={gelSaving}
             >
               {gelSaving ? (
                 <ActivityIndicator size="small" color={colors.mutedForeground} />
@@ -949,7 +933,6 @@ export default function CheckInScreen() {
                 { opacity: pressed ? 0.7 : 1, borderColor: colors.border, backgroundColor: colors.secondary },
               ]}
               onPress={() => adjustGelStock(-1)}
-              disabled={!deviceId}
             >
               <Text style={[s.gelBtnText, { color: colors.mutedForeground }]}>-1</Text>
             </Pressable>
@@ -959,7 +942,6 @@ export default function CheckInScreen() {
                 { opacity: pressed ? 0.7 : 1, borderColor: colors.border, backgroundColor: colors.secondary },
               ]}
               onPress={() => adjustGelStock(+1)}
-              disabled={!deviceId}
             >
               <Text style={[s.gelBtnText, { color: colors.mutedForeground }]}>+1</Text>
             </Pressable>
@@ -969,16 +951,10 @@ export default function CheckInScreen() {
                 { opacity: pressed ? 0.7 : 1, borderColor: colors.border, backgroundColor: colors.secondary },
               ]}
               onPress={() => adjustGelStock(+5)}
-              disabled={!deviceId}
             >
               <Text style={[s.gelBtnText, { color: colors.mutedForeground }]}>+5</Text>
             </Pressable>
           </View>
-          {!deviceId && (
-            <Text style={{ fontSize: 10, color: colors.mutedForeground, marginTop: 10, lineHeight: 15 }}>
-              Abra o app novamente para gerar o deviceId e sincronizar com o servidor.
-            </Text>
-          )}
         </View>
 
         <View style={s.card}>
@@ -1004,7 +980,7 @@ export default function CheckInScreen() {
               { opacity: pressed ? 0.7 : 1, backgroundColor: planImporting ? colors.border : colors.primary },
             ]}
             onPress={handleImportPlan}
-            disabled={planImporting || !deviceId}
+            disabled={planImporting}
           >
             {planImporting ? (
               <ActivityIndicator size="small" color={colors.mutedForeground} />
@@ -1021,7 +997,7 @@ export default function CheckInScreen() {
           <Pressable
             style={({ pressed }) => [s.checkBtn, { opacity: pressed ? 0.7 : 1 }]}
             onPress={handleCheckPlan}
-            disabled={planChecking || !deviceId}
+            disabled={planChecking}
           >
             {planChecking ? (
               <ActivityIndicator size="small" color={colors.mutedForeground} />
@@ -1048,11 +1024,6 @@ export default function CheckInScreen() {
                 </View>
               ))}
             </View>
-          )}
-          {!deviceId && (
-            <Text style={{ fontSize: 10, color: colors.mutedForeground, marginTop: 10, lineHeight: 15 }}>
-              Abra o app novamente para gerar o deviceId e sincronizar com o servidor.
-            </Text>
           )}
         </View>
 

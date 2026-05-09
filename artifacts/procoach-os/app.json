@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "PROCOACH OS V5.1",
+    "name": "PROCOACH OS V5.3",
     "slug": "procoach-os",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "procoach-os",
@@ -19,7 +19,7 @@
     "android": {
       "package": "com.procoachos.app",
       "backgroundColor": "#0A0A0A",
-      "versionCode": 4
+      "versionCode": 5
     },
     "web": {
       "favicon": "./assets/images/icon.png"

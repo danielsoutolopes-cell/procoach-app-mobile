@@ -7,12 +7,21 @@ const router: IRouter = Router();
 let cachedToken: string | null = null;
 let tokenExpiresAt = 0;
 
+function cleanEnvValue(val: string | undefined): string {
+  const v = String(val ?? "").trim();
+  if (!v) return "";
+  return v.replace(/^['"`]+/, "").replace(/['"`]+$/, "").trim();
+}
+
 async function getAccessToken(): Promise<string> {
   if (cachedToken && Date.now() < tokenExpiresAt - 60_000) {
     return cachedToken;
   }
-  const clientId     = process.env.SPOTIFY_CLIENT_ID!;
-  const clientSecret = process.env.SPOTIFY_CLIENT_SECRET!;
+  const clientId = cleanEnvValue(process.env.SPOTIFY_CLIENT_ID);
+  const clientSecret = cleanEnvValue(process.env.SPOTIFY_CLIENT_SECRET);
+  if (!clientId || !clientSecret) {
+    throw new Error("Spotify não configurado no servidor (SPOTIFY_CLIENT_ID/SECRET)");
+  }
   const creds = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
 
   const res = await fetch("https://accounts.spotify.com/api/token", {
@@ -127,8 +136,13 @@ router.get("/spotify/playlist-for-workout", async (req: Request, res: Response) 
     req.log.info({ workoutType, playlistId: playlist.id }, "Spotify playlist fetched");
     res.json({ playlist, workoutLabel: config.label });
   } catch (err) {
-    req.log.error({ err }, "Spotify playlist fetch failed");
-    res.status(502).json({ error: "Spotify unavailable" });
+    const msg = err instanceof Error ? err.message : "Spotify unavailable";
+    req.log.error({ err: msg }, "Spotify playlist fetch failed");
+    if (msg.includes("não configurado")) {
+      res.status(503).json({ error: msg });
+      return;
+    }
+    res.status(502).json({ error: msg });
   }
 });
 

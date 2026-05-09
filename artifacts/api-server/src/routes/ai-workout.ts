@@ -5,6 +5,8 @@ import { eq, desc } from "@workspace/db";
 
 const router: IRouter = Router();
 
+const MONO_DEVICE_ID = "mono";
+
 /** Injury prevention thresholds */
 const HRV_THRESHOLD = 45;    // below this → recovery
 const PAIN_THRESHOLD = 2;    // at or above this → recovery
@@ -139,20 +141,35 @@ async function generateWithGemini(params: {
   return text;
 }
 
+function defaultRaceDateISO(): string {
+  return new Date(Date.now() + 16 * 7 * 24 * 60 * 60 * 1000).toISOString();
+}
+
+async function ensureAthlete(deviceId: string): Promise<number | null> {
+  const rows = await db
+    .select({ id: athletesTable.id })
+    .from(athletesTable)
+    .where(eq(athletesTable.deviceId, deviceId))
+    .limit(1);
+  if (rows[0]) return rows[0].id;
+
+  const [created] = await db
+    .insert(athletesTable)
+    .values({ deviceId, targetRaceDate: defaultRaceDateISO() })
+    .returning();
+  return created?.id ?? null;
+}
+
 router.post("/procoach/ai-workout", async (req: Request, res: Response) => {
-  const { deviceId, currentWeek, hrv, painLevel, targetRaceDistanceKm, targetRaceDate } = req.body as {
-    deviceId: string;
+  const { deviceId: rawDeviceId, currentWeek, hrv, painLevel, targetRaceDistanceKm, targetRaceDate } = req.body as {
+    deviceId?: string;
     currentWeek: number;
     hrv: number;
     painLevel: number;
     targetRaceDistanceKm: number;
     targetRaceDate: string;
   };
-
-  if (!deviceId) {
-    res.status(400).json({ error: "deviceId is required" });
-    return;
-  }
+  const deviceId = String(rawDeviceId ?? "").trim() || MONO_DEVICE_ID;
 
   // ── INJURY PREVENTION — hard rule, skip AI entirely ──────────────────────
   const needsRecovery = (painLevel ?? 0) >= PAIN_THRESHOLD || (hrv ?? 99) < HRV_THRESHOLD;
@@ -170,15 +187,11 @@ router.post("/procoach/ai-workout", async (req: Request, res: Response) => {
   }
 
   // ── LOAD TRAINING HISTORY ─────────────────────────────────────────────────
-  const athlete = await db
-    .select({ id: athletesTable.id })
-    .from(athletesTable)
-    .where(eq(athletesTable.deviceId, deviceId))
-    .limit(1);
+  const athleteId = await ensureAthlete(deviceId);
 
   let recentHistory: { type: string; distanceKm: number; durationMin: number; week: number; entryDate: string }[] = [];
 
-  if (athlete.length > 0) {
+  if (athleteId) {
     const entries = await db
       .select({
         type: workoutEntriesTable.type,
@@ -188,7 +201,7 @@ router.post("/procoach/ai-workout", async (req: Request, res: Response) => {
         entryDate: workoutEntriesTable.entryDate,
       })
       .from(workoutEntriesTable)
-      .where(eq(workoutEntriesTable.athleteId, athlete[0]!.id))
+      .where(eq(workoutEntriesTable.athleteId, athleteId))
       .orderBy(desc(workoutEntriesTable.createdAt))
       .limit(14);
     recentHistory = entries;
@@ -358,18 +371,15 @@ function buildFallbackRecovery(totalDays: number): RecoveryDayRaw[] {
 }
 
 router.post("/procoach/post-race-recovery", async (req: Request, res: Response) => {
-  const { deviceId, raceName, raceDistanceKm, finishDurationSec, currentWeek } = req.body as {
-    deviceId: string;
+  const { deviceId: rawDeviceId, raceName, raceDistanceKm, finishDurationSec, currentWeek } = req.body as {
+    deviceId?: string;
     raceName: string;
     raceDistanceKm: number;
     finishDurationSec: number;
     currentWeek: number;
   };
-
-  if (!deviceId) {
-    res.status(400).json({ error: "deviceId is required" });
-    return;
-  }
+  const deviceId = String(rawDeviceId ?? "").trim() || MONO_DEVICE_ID;
+  await ensureAthlete(deviceId);
 
   const totalDays = raceDistanceKm <= 10 ? 3 : raceDistanceKm <= 21.1 ? 4 : 5;
   const finishMin = Math.round((finishDurationSec ?? 0) / 60);

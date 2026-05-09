@@ -14,7 +14,6 @@ import {
   getTodayWorkoutForWeek,
   shouldSuggestRecovery,
 } from "@/utils/training";
-import { getDeviceId } from "@/utils/deviceId";
 import { ProCoachAPI } from "@/services/api";
 
 export type WorkoutType =
@@ -99,7 +98,6 @@ export interface AthleteState {
 
 interface AthleteContextType {
   state: AthleteState;
-  deviceId: string | null;
   recoveryBlock: PostRaceRecovery | null;
   updateProfile: (profile: Partial<AthleteProfile>) => Promise<void>;
   updateHRV: (hrv: number) => Promise<void>;
@@ -166,7 +164,6 @@ function deriveTargetFromNextP1(profile: AthleteProfile): AthleteProfile {
 }
 
 async function fetchAIWorkout(opts: {
-  deviceId: string;
   currentWeek: number;
   hrv: number;
   painLevel: number;
@@ -176,7 +173,6 @@ async function fetchAIWorkout(opts: {
 }): Promise<DailyWorkout | null> {
   try {
     const result = await ProCoachAPI.generateAIWorkout({
-      deviceId: opts.deviceId,
       currentWeek: opts.currentWeek,
       hrv: opts.hrv,
       painLevel: opts.painLevel,
@@ -201,7 +197,6 @@ async function fetchAIWorkout(opts: {
 
 export function AthleteProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AthleteState>(DEFAULT_STATE);
-  const [deviceId, setDeviceId] = useState<string | null>(null);
   const [recoveryBlock, setRecoveryBlockState] = useState<PostRaceRecovery | null>(null);
   const mountedRef = React.useRef(true);
 
@@ -300,11 +295,7 @@ export function AthleteProvider({ children }: { children: React.ReactNode }) {
 
       // Sync to backend
       try {
-        const deviceId = await getDeviceId();
-        if (!mountedRef.current) return;
-        setDeviceId(deviceId);
         await ProCoachAPI.syncAthlete({
-          deviceId,
           name: localState.profile.name,
           targetRaceName: localState.profile.targetRaceName,
           targetRaceDate: localState.profile.targetRaceDate,
@@ -314,7 +305,7 @@ export function AthleteProvider({ children }: { children: React.ReactNode }) {
           currentWeek: localState.currentWeek,
         });
 
-        const statsRes = await ProCoachAPI.getWeeklyStats(deviceId);
+        const statsRes = await ProCoachAPI.getWeeklyStats();
         const remoteWeeklyCompleted = statsRes.weeklyCompleted ?? {};
         const merged: Record<number, number> = { ...localState.weeklyCompleted };
         for (const [week, km] of Object.entries(remoteWeeklyCompleted)) {
@@ -331,7 +322,6 @@ export function AthleteProvider({ children }: { children: React.ReactNode }) {
           setState((prev) => ({ ...prev, weeklyCompleted: merged, synced: true, aiLoading: true }));
 
           const aiWorkout = await fetchAIWorkout({
-            deviceId,
             currentWeek: localState.currentWeek,
             hrv: localState.hrv,
             painLevel: localState.painLevel,
@@ -378,9 +368,7 @@ export function AthleteProvider({ children }: { children: React.ReactNode }) {
 
   const syncToBackend = useCallback(async (s: AthleteState) => {
     try {
-      const deviceId = await getDeviceId();
       await ProCoachAPI.syncAthlete({
-        deviceId,
         name: s.profile.name,
         targetRaceName: s.profile.targetRaceName,
         targetRaceDate: s.profile.targetRaceDate,
@@ -418,9 +406,7 @@ export function AthleteProvider({ children }: { children: React.ReactNode }) {
   const regenerateWorkout = useCallback(async () => {
     setState((prev) => ({ ...prev, aiLoading: true }));
     try {
-      const deviceId = await getDeviceId();
       const aiWorkout = await fetchAIWorkout({
-        deviceId,
         currentWeek: state.currentWeek,
         hrv: state.hrv,
         painLevel: state.painLevel,
@@ -461,9 +447,7 @@ export function AthleteProvider({ children }: { children: React.ReactNode }) {
       // Regenerate AI workout after profile change
       setState((prev) => ({ ...prev, aiLoading: true }));
       try {
-        const deviceId = await getDeviceId();
         const aiWorkout = await fetchAIWorkout({
-          deviceId,
           currentWeek: newWeek,
           hrv: state.hrv,
           painLevel: state.painLevel,
@@ -547,14 +531,13 @@ export function AthleteProvider({ children }: { children: React.ReactNode }) {
     await save(next);
 
     try {
-      const deviceId = await getDeviceId();
       const rpe =
         state.todayWorkout.type === "folga"
           ? 1
           : state.todayWorkout.type === "regenerativo"
             ? 3
             : 5;
-      await ProCoachAPI.logWorkout(deviceId, {
+      await ProCoachAPI.logWorkout({
         date: entry.date,
         distanceKm: roundedKm,
         type: entry.type,
@@ -584,10 +567,9 @@ export function AthleteProvider({ children }: { children: React.ReactNode }) {
 
   const refreshHistory = useCallback(async () => {
     try {
-      const deviceId = await getDeviceId();
       const [workoutsRes, statsRes] = await Promise.all([
-        ProCoachAPI.getWorkouts(deviceId, 100),
-        ProCoachAPI.getWeeklyStats(deviceId),
+        ProCoachAPI.getWorkouts(100),
+        ProCoachAPI.getWeeklyStats(),
       ]);
       const entries = (workoutsRes.entries as any[]).map((e) => ({
         date: e.entryDate ?? e.entry_date ?? "",
@@ -613,7 +595,6 @@ export function AthleteProvider({ children }: { children: React.ReactNode }) {
   const submitDailyCheckIn = useCallback(
     async (hrv: number, pain: number) => {
       const todayStr = new Date().toDateString();
-      const devId = await getDeviceId();
 
       // Save HRV + pain + mark check-in date, clear AI cache so fresh workout generates
       await AsyncStorage.multiRemove([AI_WORKOUT_CACHE_KEY, AI_WORKOUT_DATE_KEY]);
@@ -632,7 +613,6 @@ export function AthleteProvider({ children }: { children: React.ReactNode }) {
       setState((prev) => ({ ...prev, hrv, painLevel: pain, lastCheckInDate: todayStr, aiLoading: true }));
       try {
         const aiWorkout = await fetchAIWorkout({
-          deviceId: devId,
           currentWeek: state.currentWeek,
           hrv,
           painLevel: pain,
@@ -671,7 +651,7 @@ export function AthleteProvider({ children }: { children: React.ReactNode }) {
   return (
     <AthleteContext.Provider
       value={{
-        state, deviceId, recoveryBlock,
+        state, recoveryBlock,
         updateProfile, updateHRV, updatePainLevel, markWorkoutComplete,
         setCurrentWeek, refreshHistory, regenerateWorkout, submitDailyCheckIn,
         setRecoveryBlock, clearRecoveryBlock,

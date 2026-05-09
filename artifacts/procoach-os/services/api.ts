@@ -42,7 +42,6 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 // -----------------------------------------------------------------------------
 
 export interface AthletePayload {
-  deviceId: string;
   name?: string;
   // Regra de Ouro: Foco absoluto na Prova Alvo
   targetRaceName?: string;
@@ -99,12 +98,12 @@ export const ProCoachAPI = {
     });
   },
 
-  async getAthlete(deviceId: string) {
-    return request<{ athlete: unknown }>(`/procoach/athletes/${deviceId}`);
+  async getAthlete() {
+    return request<{ athlete: unknown }>(`/procoach/me`);
   },
 
   // --- TELEMETRIA TÁTICA (TREINOS) ---
-  async logWorkout(deviceId: string, payload: WorkoutPayload) {
+  async logWorkout(payload: WorkoutPayload) {
     // REGRA DE OURO: QUILOMETRAGEM REDONDA
     // Intercepta e arredonda matematicamente antes de enviar ao Render
     const cargaBlindada = {
@@ -113,57 +112,57 @@ export const ProCoachAPI = {
     };
 
     return request<{ entry: unknown }>(
-      `/procoach/athletes/${deviceId}/workouts`,
+      `/procoach/me/workouts`,
       { method: "POST", body: JSON.stringify(cargaBlindada) }
     );
   },
 
-  async logWorkoutFeedback(deviceId: string, payload: { date: string; rpe?: number; painLevel?: number; notes?: string }) {
-    return request<{ ok: boolean; entryDate: string }>(`/procoach/athletes/${deviceId}/workout-feedback`, {
+  async logWorkoutFeedback(payload: { date: string; rpe?: number; painLevel?: number; notes?: string }) {
+    return request<{ ok: boolean; entryDate: string }>(`/procoach/me/workout-feedback`, {
       method: "POST",
       body: JSON.stringify(payload),
     });
   },
 
-  async getWorkouts(deviceId: string, limit = 30) {
+  async getWorkouts(limit = 30) {
     return request<{ entries: unknown[] }>(
-      `/procoach/athletes/${deviceId}/workouts?limit=${limit}`
+      `/procoach/me/workouts?limit=${limit}`
     );
   },
 
-  async getWeeklyStats(deviceId: string) {
+  async getWeeklyStats() {
     return request<{ weeklyCompleted: Record<number, number> }>(
-      `/procoach/athletes/${deviceId}/weekly-stats`
+      `/procoach/me/weekly-stats`
     );
   },
 
   // --- ESTOQUE DE GÉIS ---
-  async getGelStock(deviceId: string) {
-    return request<{ gelsInStock: number }>(`/procoach/athletes/${deviceId}/gel-stock`);
+  async getGelStock() {
+    return request<{ gelsInStock: number }>(`/procoach/me/gel-stock`);
   },
 
-  async setGelStock(deviceId: string, gelsInStock: number) {
-    return request<{ gelsInStock: number }>(`/procoach/athletes/${deviceId}/gel-stock`, {
+  async setGelStock(gelsInStock: number) {
+    return request<{ gelsInStock: number }>(`/procoach/me/gel-stock`, {
       method: "PUT",
       body: JSON.stringify({ gelsInStock }),
     });
   },
 
-  async logGelUsage(deviceId: string, payload: { date: string; context: string; gelsUsed: number }) {
+  async logGelUsage(payload: { date: string; context: string; gelsUsed: number }) {
     return request<{ gelsInStock: number; gelsUsed: number; entryDate: string; context: string }>(
-      `/procoach/athletes/${deviceId}/gel-usage`,
+      `/procoach/me/gel-usage`,
       { method: "POST", body: JSON.stringify(payload) }
     );
   },
 
-  async importPlanJson(deviceId: string, payload: unknown) {
+  async importPlanJson(payload: unknown) {
     return request<{ imported: number; firstDate: string; lastDate: string }>(
-      `/procoach/athletes/${deviceId}/plan/import-json`,
+      `/procoach/me/plan/import-json`,
       { method: "POST", body: JSON.stringify(payload) }
     );
   },
 
-  async getPlan(deviceId: string, opts: { from?: string; to?: string } = {}) {
+  async getPlan(opts: { from?: string; to?: string } = {}) {
     const qs = new URLSearchParams();
     if (opts.from) qs.set("from", opts.from);
     if (opts.to) qs.set("to", opts.to);
@@ -179,10 +178,10 @@ export const ProCoachAPI = {
         structure: string | null;
         planned_km?: number;
       }>;
-    }>(`/procoach/athletes/${deviceId}/plan${suffix}`);
+    }>(`/procoach/me/plan${suffix}`);
   },
 
-  async getPlanToday(deviceId: string, date?: string) {
+  async getPlanToday(date?: string) {
     const suffix = date ? `?date=${encodeURIComponent(date)}` : "";
     return request<{
       session: null | {
@@ -195,10 +194,26 @@ export const ProCoachAPI = {
         structure: string | null;
         planned_km?: number;
       };
-    }>(`/procoach/athletes/${deviceId}/plan/today${suffix}`);
+    }>(`/procoach/me/plan/today${suffix}`);
   },
 
-  async getCompliance(deviceId: string, opts: { from?: string; to?: string } = {}) {
+  async getPlanNext(from?: string) {
+    const suffix = from ? `?from=${encodeURIComponent(from)}` : "";
+    return request<{
+      session: null | {
+        session_date: string;
+        day_name: string | null;
+        activity: string;
+        pace_target: string | null;
+        treadmill_speed: string | null;
+        rest_interval: string | null;
+        structure: string | null;
+        planned_km?: number;
+      };
+    }>(`/procoach/me/plan/next${suffix}`);
+  },
+
+  async getCompliance(opts: { from?: string; to?: string } = {}) {
     const qs = new URLSearchParams();
     if (opts.from) qs.set("from", opts.from);
     if (opts.to) qs.set("to", opts.to);
@@ -210,19 +225,19 @@ export const ProCoachAPI = {
       plannedKm: number;
       completedSessions: number;
       completedKm: number;
-    }>(`/procoach/athletes/${deviceId}/compliance${suffix}`);
+    }>(`/procoach/me/compliance${suffix}`);
   },
 
-  async upsertBioimpedance(deviceId: string, payload: unknown) {
-    return request<{ entry: Record<string, unknown> | null }>(`/procoach/athletes/${deviceId}/bioimpedance`, {
+  async upsertBioimpedance(payload: unknown) {
+    return request<{ entry: Record<string, unknown> | null }>(`/procoach/me/bioimpedance`, {
       method: "POST",
       body: JSON.stringify(payload),
     });
   },
 
-  async getBioimpedance(deviceId: string, limit = 30) {
+  async getBioimpedance(limit = 30) {
     return request<{ entries: Array<Record<string, unknown>> }>(
-      `/procoach/athletes/${deviceId}/bioimpedance?limit=${Math.max(1, Math.min(90, limit))}`
+      `/procoach/me/bioimpedance?limit=${Math.max(1, Math.min(90, limit))}`
     );
   },
 
@@ -259,44 +274,43 @@ export const ProCoachAPI = {
   },
 
   // --- INTEGRAÇÃO STRAVA ---
-  async stravaStatus(deviceId: string) {
+  async stravaStatus() {
     return request<{ connected: boolean; configured: boolean; lastSyncAt: string | null }>(
-      `/strava/status-device?deviceId=${encodeURIComponent(deviceId)}`
+      `/strava/status-device`
     );
   },
 
-  async stravaSync(deviceId: string) {
+  async stravaSync() {
     return request<{ imported: number; synced: boolean }>("/strava/sync-device", {
       method: "POST",
-      body: JSON.stringify({ deviceId }),
+      body: JSON.stringify({}),
     });
   },
 
-  async stravaDisconnect(deviceId: string) {
+  async stravaDisconnect() {
     return request<{ disconnected: boolean }>("/strava/disconnect-device", {
       method: "POST",
-      body: JSON.stringify({ deviceId }),
+      body: JSON.stringify({}),
     });
   },
 
-  async stravaConnectUrl(deviceId: string): Promise<string> {
+  async stravaConnectUrl(): Promise<string> {
     const res = await request<{ url: string }> (
-      `/strava/connect-url?deviceId=${encodeURIComponent(deviceId)}`
+      `/strava/connect-url`
     );
     return res.url;
   },
 
   // --- NOTIFICAÇÕES TÁTICAS ---
-  async registerPushToken(deviceId: string, pushToken: string) {
+  async registerPushToken(pushToken: string) {
     return request<{ registered: boolean }>(
-      `/procoach/athletes/${deviceId}/push-token`,
+      `/procoach/me/push-token`,
       { method: "POST", body: JSON.stringify({ token: pushToken }) }
     );
   },
 
   // --- ORÁCULO DE IA E LOGÍSTICA ---
   async generateAIWorkout(payload: {
-    deviceId: string;
     currentWeek: number;
     hrv: number;
     painLevel: number;
@@ -324,7 +338,6 @@ export const ProCoachAPI = {
   },
 
   async generatePostRaceRecovery(payload: {
-    deviceId: string;
     raceName: string;
     raceDistanceKm: number;
     finishDurationSec: number;

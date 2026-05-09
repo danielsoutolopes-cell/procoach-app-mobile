@@ -1,6 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import * as WebBrowser from "expo-web-browser";
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   ActivityIndicator,
   Alert,
@@ -12,7 +13,6 @@ import {
   View,
 } from "react-native";
 
-import { useAthlete } from "@/context/AthleteContext";
 import { useColors } from "@/hooks/useColors";
 import { ProCoachAPI } from "@/services/api";
 
@@ -26,9 +26,12 @@ interface Props {
   onSyncComplete?: () => void;
 }
 
+function getSaoPauloDayKey(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+}
+
 export function StravaCard({ onSyncComplete }: Props) {
   const colors = useColors();
-  const { deviceId } = useAthlete();
   const [status, setStatus] = useState<StravaStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -36,13 +39,12 @@ export function StravaCard({ onSyncComplete }: Props) {
   const appStateRef = useRef(AppState.currentState);
 
   const fetchStatus = useCallback(async () => {
-    if (!deviceId) return;
     try {
-      const s = await ProCoachAPI.stravaStatus(deviceId);
+      const s = await ProCoachAPI.stravaStatus();
       setStatus(s);
     } catch {}
     setLoading(false);
-  }, [deviceId]);
+  }, []);
 
   useEffect(() => {
     fetchStatus();
@@ -62,16 +64,15 @@ export function StravaCard({ onSyncComplete }: Props) {
   }, [connecting, fetchStatus]);
 
   const handleConnect = useCallback(async () => {
-    if (!deviceId) return;
     setConnecting(true);
     try {
-      const url = await ProCoachAPI.stravaConnectUrl(deviceId);
+      const url = await ProCoachAPI.stravaConnectUrl();
       if (Platform.OS === "web") {
         window.open(url, "_blank", "width=600,height=700");
         let attempts = 0;
         const poll = setInterval(async () => {
           attempts++;
-          const s = await ProCoachAPI.stravaStatus(deviceId).catch(() => null);
+          const s = await ProCoachAPI.stravaStatus().catch(() => null);
           if (s?.connected || attempts > 30) {
             clearInterval(poll);
             setConnecting(false);
@@ -80,19 +81,48 @@ export function StravaCard({ onSyncComplete }: Props) {
         }, 2000);
       } else {
         await WebBrowser.openBrowserAsync(url);
+        let attempts = 0;
+        while (attempts < 12) {
+          attempts++;
+          const s = await ProCoachAPI.stravaStatus().catch(() => null);
+          if (s) setStatus(s);
+          if (s?.connected) break;
+          await new Promise((r) => setTimeout(r, 2000));
+        }
         setConnecting(false);
-        await fetchStatus();
       }
-    } catch {
+    } catch (e: any) {
       setConnecting(false);
+      if (Platform.OS !== "web") {
+        Alert.alert("Strava", e?.message ?? "Falha ao abrir conexão com o Strava.");
+      }
     }
-  }, [deviceId, fetchStatus]);
+  }, [fetchStatus]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (loading) return;
+      if (!status) return;
+      if (status.connected) return;
+      if (status.configured === false) return;
+      const key = `@procoach_strava_autoconnect_${getSaoPauloDayKey()}`;
+      const already = await AsyncStorage.getItem(key).catch(() => null);
+      if (already) return;
+      await AsyncStorage.setItem(key, "1").catch(() => {});
+      if (!cancelled) {
+        await handleConnect();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, status, handleConnect]);
 
   const handleSync = useCallback(async () => {
-    if (!deviceId) return;
     setSyncing(true);
     try {
-      const result = await ProCoachAPI.stravaSync(deviceId);
+      const result = await ProCoachAPI.stravaSync();
       await fetchStatus();
       onSyncComplete?.();
       if (Platform.OS !== "web") {
@@ -110,10 +140,9 @@ export function StravaCard({ onSyncComplete }: Props) {
       }
     }
     setSyncing(false);
-  }, [deviceId, fetchStatus, onSyncComplete]);
+  }, [fetchStatus, onSyncComplete]);
 
   const handleDisconnect = useCallback(async () => {
-    if (!deviceId) return;
     const confirmed = Platform.OS === "web"
       ? window.confirm("Desconectar o Strava?")
       : await new Promise<boolean>((resolve) =>
@@ -123,9 +152,9 @@ export function StravaCard({ onSyncComplete }: Props) {
           ])
         );
     if (!confirmed) return;
-    await ProCoachAPI.stravaDisconnect(deviceId).catch(() => {});
+    await ProCoachAPI.stravaDisconnect().catch(() => {});
     setStatus({ connected: false, lastSyncAt: null });
-  }, [deviceId]);
+  }, []);
 
   const s = StyleSheet.create({
     card: {

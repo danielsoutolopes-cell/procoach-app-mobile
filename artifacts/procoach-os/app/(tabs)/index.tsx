@@ -18,6 +18,7 @@ import { useColors } from "@/hooks/useColors";
 import { RaceModeCard } from "@/components/RaceModeCard";
 import { RecoveryBlockCard } from "@/components/RecoveryBlockCard";
 import { SpotifyPlaylistCard } from "@/components/SpotifyPlaylistCard";
+import { StravaCard } from "@/components/StravaCard";
 import { ProCoachAPI } from "@/services/api";
 import { Race } from "@/context/AthleteContext";
 import {
@@ -159,7 +160,7 @@ export default function DashboardScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const {
-    state, markWorkoutComplete, regenerateWorkout, deviceId,
+    state, markWorkoutComplete, regenerateWorkout,
     recoveryBlock, setRecoveryBlock, clearRecoveryBlock,
   } = useAthlete();
   const { todayWorkout, currentWeek, hrv, painLevel, profile, aiLoading } = state;
@@ -206,7 +207,6 @@ export default function DashboardScreen() {
   const recoveryWorkoutCompleted = recoveryBlock?.completedDayOffsets?.includes(recoveryDayOffset) ?? false;
 
   const requestDebrief = React.useCallback((context: string) => {
-    if (!deviceId) return;
     Alert.alert("Debrief", "Quer registrar RPE e dor agora?", [
       { text: "Depois", style: "cancel" },
       {
@@ -217,7 +217,7 @@ export default function DashboardScreen() {
               promptPain({
                 onSelect: async (pain) => {
                   try {
-                    await ProCoachAPI.logWorkoutFeedback(deviceId, {
+                    await ProCoachAPI.logWorkoutFeedback({
                       date: getSaoPauloDayKey(),
                       rpe,
                       painLevel: pain,
@@ -231,13 +231,11 @@ export default function DashboardScreen() {
         },
       },
     ]);
-  }, [deviceId]);
+  }, []);
 
   const handleRaceFinished = React.useCallback(async (finishDurationSec: number, race: Race) => {
-    if (!deviceId) return;
     try {
       const result = await ProCoachAPI.generatePostRaceRecovery({
-        deviceId,
         raceName: race.name,
         raceDistanceKm: race.distanceKm,
         finishDurationSec,
@@ -260,7 +258,7 @@ export default function DashboardScreen() {
       title: "Prova concluída",
       onSelect: async (gelsUsed) => {
         try {
-          await ProCoachAPI.logGelUsage(deviceId, {
+          await ProCoachAPI.logGelUsage({
             date: getSaoPauloDayKey(),
             context: `race:${race.id}`,
             gelsUsed,
@@ -269,7 +267,7 @@ export default function DashboardScreen() {
         requestDebrief(`race:${race.id}`);
       },
     });
-  }, [deviceId, currentWeek, setRecoveryBlock, requestDebrief]);
+  }, [currentWeek, setRecoveryBlock, requestDebrief]);
 
   const handleRecoveryComplete = React.useCallback(async () => {
     if (!recoveryBlock) return;
@@ -337,11 +335,10 @@ export default function DashboardScreen() {
 
   React.useEffect(() => {
     let cancelled = false;
-    if (!deviceId) return;
     (async () => {
       setPlanTodayLoading(true);
       try {
-        const r = await ProCoachAPI.getPlanToday(deviceId);
+        const r = await ProCoachAPI.getPlanToday();
         if (!cancelled) setPlanToday(r.session ?? null);
       } catch {
       } finally {
@@ -349,7 +346,7 @@ export default function DashboardScreen() {
       }
     })();
     return () => { cancelled = true; };
-  }, [deviceId]);
+  }, []);
 
   const handleComplete = async () => {
     if (todayWorkout.completed) return;
@@ -362,14 +359,13 @@ export default function DashboardScreen() {
         : calcEstimatedTimeMin(todayWorkout.distanceKm, 6.75);
     const isLongao =
       todayWorkout.type === "corrida" && (todayWorkout.distanceKm >= 12 || estimatedMin >= 70);
-    if (!deviceId) return;
 
     if (isLongao) {
       promptGelUsage({
         title: "Longão concluído",
         onSelect: async (gelsUsed) => {
           try {
-            await ProCoachAPI.logGelUsage(deviceId, {
+            await ProCoachAPI.logGelUsage({
               date: getSaoPauloDayKey(),
               context: "longao",
               gelsUsed,
@@ -1003,10 +999,9 @@ export default function DashboardScreen() {
           </>
         )}
 
-        {/* ── SPOTIFY PLAYLIST ──────────────────────────── */}
-        {!todayRace && !isInRecovery && !isRecoveryExpired && !aiLoading && (
-          <SpotifyPlaylistCard workoutType={todayWorkout.type} />
-        )}
+        <StravaCard />
+
+        <SpotifyPlaylistCard workoutType={todayWorkout.type} />
 
         <Text style={s.sectionTitle}>MONITORAMENTO</Text>
         <View style={s.hrvCard}>

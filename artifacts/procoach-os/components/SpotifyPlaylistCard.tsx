@@ -24,16 +24,19 @@ export function SpotifyPlaylistCard({ workoutType }: Props) {
   const [workoutLabel, setWorkoutLabel] = useState<string>("");
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string>("");
 
   const fetchPlaylist = useCallback(async () => {
     setLoading(true);
     setError(false);
+    setErrorMessage("");
     try {
       const result = await ProCoachAPI.getSpotifyPlaylist(workoutType);
       setPlaylist(result.playlist);
       setWorkoutLabel(result.workoutLabel);
-    } catch {
+    } catch (e: any) {
       setError(true);
+      setErrorMessage(String(e?.message ?? ""));
     } finally {
       setLoading(false);
     }
@@ -70,7 +73,8 @@ export function SpotifyPlaylistCard({ workoutType }: Props) {
           ♫ SPOTIFY
         </Text>
         <Text style={{ fontSize: 11, color: colors.mutedForeground, marginTop: 6, lineHeight: 16 }}>
-          Não consegui carregar a playlist agora. Verifique a conexão com o servidor e tente novamente.
+          Não consegui carregar a playlist agora.
+          {errorMessage ? `\n\n${errorMessage}` : "\n\nVerifique a conexão com o servidor e tente novamente."}
         </Text>
         <Pressable
           onPress={fetchPlaylist}

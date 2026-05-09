@@ -1152,4 +1152,101 @@ router.post("/telegram/daily", async (req: Request, res: Response) => {
   }
 });
 
+async function getDailyForecastForDate(dateISO: string): Promise<string> {
+  try {
+    const url =
+      `https://api.open-meteo.com/v1/forecast?latitude=${HOME_LAT}&longitude=${HOME_LON}` +
+      `&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,windspeed_10m_max,weathercode` +
+      `&timezone=America%2FSao_Paulo`;
+    const r = await fetch(url);
+    if (!r.ok) return "🌡️ Previsão indisponível";
+    const data = await r.json() as {
+      daily?: {
+        time: string[];
+        temperature_2m_max: number[];
+        temperature_2m_min: number[];
+        precipitation_probability_max: number[];
+        windspeed_10m_max: number[];
+        weathercode: number[];
+      };
+    };
+    const d = data.daily;
+    if (!d?.time?.length) return "🌡️ Previsão indisponível";
+    const idx = d.time.findIndex((t) => t === dateISO);
+    if (idx < 0) return "🌡️ Previsão indisponível";
+    const emoji = d.weathercode?.[idx] === 0 ? "☀️" : (d.weathercode?.[idx] ?? 0) <= 3 ? "⛅" : (d.weathercode?.[idx] ?? 0) <= 67 ? "🌧️" : "⛈️";
+    const minC = Math.round(d.temperature_2m_min?.[idx] ?? 0);
+    const maxC = Math.round(d.temperature_2m_max?.[idx] ?? 0);
+    const rain = Math.round(d.precipitation_probability_max?.[idx] ?? 0);
+    const wind = Math.round(d.windspeed_10m_max?.[idx] ?? 0);
+    return `${emoji} *${minC}°–${maxC}°* | 💧 ${rain}% | 💨 ${wind}km/h`;
+  } catch {
+    return "🌡️ Previsão indisponível";
+  }
+}
+
+router.post("/telegram/nightly", async (req: Request, res: Response) => {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  const secret = process.env.TELEGRAM_CRON_SECRET;
+  const provided = String(req.headers["x-cron-secret"] ?? "");
+  if (!token || !chatId) { res.status(500).json({ error: "TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set" }); return; }
+  if (!secret) { res.status(500).json({ error: "TELEGRAM_CRON_SECRET not set" }); return; }
+  if (provided !== secret) { res.status(401).json({ error: "unauthorized" }); return; }
+
+  res.json({ ok: true });
+  try {
+    const athlete = await getPrimaryAthlete();
+    if (!athlete) {
+      await sendTelegram(chatId, "⚠️ Nenhum atleta no sistema. Abre o app ProCoach primeiro.");
+      return;
+    }
+
+    await ensurePlanTable();
+    const today = getSaoPauloDayKey();
+    const next = await db.execute(sql`
+      SELECT session_date, day_name, activity, pace_target, treadmill_speed, rest_interval, structure, planned_km
+      FROM procoach_plan_sessions
+      WHERE athlete_id = ${athlete.id} AND session_date > ${today}
+      ORDER BY session_date ASC
+      LIMIT 1
+    `) as { rows: Array<{
+      session_date: string;
+      day_name: string | null;
+      activity: string;
+      pace_target: string | null;
+      treadmill_speed: string | null;
+      rest_interval: string | null;
+      structure: string | null;
+      planned_km: number | string;
+    }> };
+
+    const s = next.rows[0];
+    if (!s) {
+      await sendTelegram(chatId, `🌙 *PROCOACH OS — BRIEFING 22H*\n\nNenhum próximo treino encontrado no plano. Importa o plano no app (Status).`);
+      return;
+    }
+
+    const forecast = await getDailyForecastForDate(s.session_date);
+    const km = Number(s.planned_km) > 0 ? ` · *${Number(s.planned_km)}km*` : "";
+    const details =
+      (s.pace_target ? `🎯 Pace: *${s.pace_target}*\n` : "") +
+      (s.rest_interval ? `⏱️ Repouso: *${s.rest_interval}*\n` : "") +
+      (s.treadmill_speed ? `🏃‍♂️ Esteira: *${s.treadmill_speed}*\n` : "") +
+      (s.structure ? `\n🧩 *Estrutura:*\n${s.structure}\n` : "");
+
+    await sendTelegram(
+      chatId,
+      `🌙 *PROCOACH OS — BRIEFING 22H*\n\n` +
+        `📆 Amanhã (*${s.session_date}*):\n` +
+        `🏃 *${s.activity}*${km}\n\n` +
+        `🌤️ Clima: ${forecast}\n\n` +
+        details +
+        `_Dormir bem hoje = performance amanhã._`
+    );
+  } catch (err) {
+    console.error("[Telegram nightly error]", err);
+  }
+});
+
 export default router;

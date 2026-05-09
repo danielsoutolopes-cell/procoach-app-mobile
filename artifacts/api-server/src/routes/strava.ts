@@ -10,6 +10,8 @@ import {
 
 const router: IRouter = Router();
 
+const MONO_DEVICE_ID = "mono";
+
 const CLIENT_ID     = process.env.STRAVA_CLIENT_ID;
 const CLIENT_SECRET = process.env.STRAVA_CLIENT_SECRET;
 
@@ -17,8 +19,14 @@ function isConfigured(): boolean {
   return Boolean(CLIENT_ID && CLIENT_SECRET);
 }
 
+function cleanEnvUrl(val: string | undefined): string {
+  const v = String(val ?? "").trim();
+  if (!v) return "";
+  return v.replace(/^['"`]+/, "").replace(/['"`]+$/, "").trim();
+}
+
 function getRedirectUri(req: Request): string {
-  const explicit = process.env.STRAVA_REDIRECT_URI?.trim();
+  const explicit = cleanEnvUrl(process.env.STRAVA_REDIRECT_URI);
   if (explicit) return explicit;
   const domains = process.env.REPLIT_DOMAINS ?? "";
   const primary = domains.split(",")[0]?.trim();
@@ -52,7 +60,15 @@ async function getAthleteByDeviceId(deviceId: string) {
     .from(athletesTable)
     .where(eq(athletesTable.deviceId, deviceId))
     .limit(1);
-  return rows[0] ?? null;
+  if (rows[0]) return rows[0];
+  if (deviceId !== MONO_DEVICE_ID) return null;
+
+  const defaultRaceDate = new Date(Date.now() + 16 * 7 * 24 * 60 * 60 * 1000).toISOString();
+  const created = await db
+    .insert(athletesTable)
+    .values({ deviceId: MONO_DEVICE_ID, targetRaceDate: defaultRaceDate })
+    .returning();
+  return created[0] ?? null;
 }
 
 // ─── Token refresh ────────────────────────────────────────────────────────────
@@ -167,8 +183,8 @@ router.get("/strava/configured", (_req: Request, res: Response) => {
 
 router.get("/strava/connect-url", async (req: Request, res: Response) => {
   if (!isConfigured()) { res.status(503).json({ error: "Strava não configurado. Adicione STRAVA_CLIENT_ID e STRAVA_CLIENT_SECRET." }); return; }
-  const { deviceId } = req.query as { deviceId?: string };
-  if (!deviceId) { res.status(400).json({ error: "deviceId obrigatório" }); return; }
+  const { deviceId: raw } = req.query as { deviceId?: string };
+  const deviceId = (raw ?? "").trim() || MONO_DEVICE_ID;
   const athlete = await getAthleteByDeviceId(deviceId);
   if (!athlete) { res.status(404).json({ error: "Atleta não encontrado. Abra o app primeiro." }); return; }
 
@@ -183,8 +199,8 @@ router.get("/strava/connect-url", async (req: Request, res: Response) => {
 });
 
 router.get("/strava/status-device", async (req: Request, res: Response) => {
-  const { deviceId } = req.query as { deviceId?: string };
-  if (!deviceId) { res.status(400).json({ error: "deviceId obrigatório" }); return; }
+  const { deviceId: raw } = req.query as { deviceId?: string };
+  const deviceId = (raw ?? "").trim() || MONO_DEVICE_ID;
   const athlete = await getAthleteByDeviceId(deviceId);
   if (!athlete) { res.status(404).json({ error: "Atleta não encontrado" }); return; }
 
@@ -194,8 +210,8 @@ router.get("/strava/status-device", async (req: Request, res: Response) => {
 });
 
 router.post("/strava/sync-device", async (req: Request, res: Response) => {
-  const { deviceId, raceDate } = req.body as { deviceId?: string; raceDate?: string };
-  if (!deviceId) { res.status(400).json({ error: "deviceId obrigatório" }); return; }
+  const { deviceId: raw, raceDate } = req.body as { deviceId?: string; raceDate?: string };
+  const deviceId = (raw ?? "").trim() || MONO_DEVICE_ID;
   const athlete = await getAthleteByDeviceId(deviceId);
   if (!athlete) { res.status(404).json({ error: "Atleta não encontrado" }); return; }
 
@@ -214,10 +230,11 @@ router.post("/strava/sync-device", async (req: Request, res: Response) => {
 });
 
 router.post("/strava/race-result", async (req: Request, res: Response) => {
-  const { deviceId, raceDate, distanceKm } = req.body as {
+  const { deviceId: raw, raceDate, distanceKm } = req.body as {
     deviceId?: string; raceDate?: string; distanceKm?: number;
   };
-  if (!deviceId || !raceDate) { res.status(400).json({ error: "deviceId e raceDate são obrigatórios" }); return; }
+  const deviceId = (raw ?? "").trim() || MONO_DEVICE_ID;
+  if (!raceDate) { res.status(400).json({ error: "raceDate é obrigatório" }); return; }
 
   const athlete = await getAthleteByDeviceId(deviceId);
   if (!athlete) { res.status(404).json({ error: "Atleta não encontrado" }); return; }
@@ -280,8 +297,8 @@ router.post("/strava/race-result", async (req: Request, res: Response) => {
 });
 
 router.post("/strava/disconnect-device", async (req: Request, res: Response) => {
-  const { deviceId } = req.body as { deviceId?: string };
-  if (!deviceId) { res.status(400).json({ error: "deviceId obrigatório" }); return; }
+  const { deviceId: raw } = req.body as { deviceId?: string };
+  const deviceId = (raw ?? "").trim() || MONO_DEVICE_ID;
   const athlete = await getAthleteByDeviceId(deviceId);
   if (!athlete) { res.status(404).json({ error: "Atleta não encontrado" }); return; }
   await db.delete(stravaTokensTable).where(eq(stravaTokensTable.athleteId, athlete.id));

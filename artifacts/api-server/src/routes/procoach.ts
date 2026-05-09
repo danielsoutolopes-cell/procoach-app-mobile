@@ -10,6 +10,8 @@ import {
 
 const router: IRouter = Router();
 
+const MONO_DEVICE_ID = "mono";
+
 function roundKm(val: number): number {
   return Math.round(val);
 }
@@ -20,6 +22,30 @@ function normalizeEntryDate(raw: string): string {
   const parsed = new Date(raw);
   if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
   return new Date().toISOString().slice(0, 10);
+}
+
+function defaultRaceDateISO(): string {
+  return new Date(Date.now() + 16 * 7 * 24 * 60 * 60 * 1000).toISOString();
+}
+
+async function getOrCreateMonoAthleteId(): Promise<number> {
+  const existing = await db
+    .select({ id: athletesTable.id })
+    .from(athletesTable)
+    .where(eq(athletesTable.deviceId, MONO_DEVICE_ID) as any)
+    .limit(1);
+
+  if (existing[0]) return existing[0].id;
+
+  const [created] = await db
+    .insert(athletesTable)
+    .values({
+      deviceId: MONO_DEVICE_ID,
+      targetRaceDate: defaultRaceDateISO(),
+    })
+    .returning();
+
+  return created.id;
 }
 
 let gelTablesReady = false;
@@ -285,7 +311,12 @@ async function sendTelegram(text: string): Promise<void> {
 
 router.post("/procoach/athletes/sync", async (req: Request, res: Response) => {
   // Validação em tempo de execução com Zod
-  const parseResult = insertAthleteSchema.safeParse(req.body);
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const inferredDeviceId =
+    typeof body.deviceId === "string" && body.deviceId.trim()
+      ? body.deviceId.trim()
+      : MONO_DEVICE_ID;
+  const parseResult = insertAthleteSchema.safeParse({ ...body, deviceId: inferredDeviceId });
 
   if (!parseResult.success) {
     res.status(400).json({ error: "Invalid athlete data", details: parseResult.error.issues });
@@ -334,6 +365,511 @@ router.post("/procoach/athletes/sync", async (req: Request, res: Response) => {
   }
 
   res.json({ athlete });
+});
+
+router.get("/procoach/me", async (_req: Request, res: Response) => {
+  const athleteId = await getOrCreateMonoAthleteId();
+  const rows = await db
+    .select()
+    .from(athletesTable)
+    .where(eq(athletesTable.id, athleteId) as any)
+    .limit(1);
+  res.json({ athlete: rows[0] ?? null });
+});
+
+router.post("/procoach/me/workouts", async (req: Request, res: Response) => {
+  const { date, distanceKm, type, durationMin, week, injuryAlert, rpe, painLevel, notes } = req.body as {
+    date: string;
+    distanceKm: number;
+    type: string;
+    durationMin: number;
+    week: number;
+    injuryAlert?: string;
+    rpe?: number;
+    painLevel?: number;
+    notes?: string;
+  };
+
+  const athleteId = await getOrCreateMonoAthleteId();
+  const roundedKm = roundKm(distanceKm);
+  const entryDate = normalizeEntryDate(date);
+
+  const existingEntry = await db
+    .select()
+    .from(workoutEntriesTable)
+    .where(and(eq(workoutEntriesTable.athleteId, athleteId), eq(workoutEntriesTable.entryDate, entryDate)) as any)
+    .limit(1);
+  if (existingEntry[0]) {
+    await upsertWorkoutFeedback({ athleteId, entryDate, rpe, painLevel, notes });
+    res.json({ entry: existingEntry[0] });
+    return;
+  }
+
+  const [entry] = await db
+    .insert(workoutEntriesTable)
+    .values({
+      athleteId,
+      entryDate,
+      distanceKm: roundedKm,
+      type: type as any,
+      durationMin,
+      week,
+      injuryAlert: injuryAlert ?? null,
+    })
+    .returning();
+
+  await upsertWorkoutFeedback({ athleteId, entryDate, rpe, painLevel, notes });
+
+  const existing = await db
+    .select()
+    .from(weeklyStatsTable)
+    .where(and(eq(weeklyStatsTable.athleteId, athleteId), eq(weeklyStatsTable.week, week)) as any)
+    .limit(1);
+
+  if (existing.length === 0) {
+    await db.insert(weeklyStatsTable).values({
+      athleteId,
+      week,
+      completedKm: roundedKm,
+      sessionsCount: 1,
+    });
+  } else {
+    await db
+      .update(weeklyStatsTable)
+      .set({
+        completedKm: existing[0]!.completedKm + roundedKm,
+        sessionsCount: existing[0]!.sessionsCount + 1,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(weeklyStatsTable.athleteId, athleteId), eq(weeklyStatsTable.week, week)));
+  }
+
+  res.json({ entry });
+});
+
+router.post("/procoach/me/workout-feedback", async (req: Request, res: Response) => {
+  const { date, rpe, painLevel, notes } = req.body as {
+    date?: string;
+    rpe?: number;
+    painLevel?: number;
+    notes?: string;
+  };
+
+  const athleteId = await getOrCreateMonoAthleteId();
+  const entryDate = normalizeEntryDate(String(date ?? new Date().toISOString()));
+  await upsertWorkoutFeedback({ athleteId, entryDate, rpe, painLevel, notes });
+  res.json({ ok: true, entryDate });
+});
+
+router.get("/procoach/me/workouts", async (req: Request, res: Response) => {
+  const limitParam = Number(req.query.limit) || 30;
+  const athleteId = await getOrCreateMonoAthleteId();
+
+  const entries = await db
+    .select()
+    .from(workoutEntriesTable)
+    .where(eq(workoutEntriesTable.athleteId, athleteId) as any)
+    .orderBy(desc(workoutEntriesTable.createdAt) as any)
+    .limit(limitParam);
+
+  res.json({ entries });
+});
+
+router.get("/procoach/me/weekly-stats", async (_req: Request, res: Response) => {
+  const athleteId = await getOrCreateMonoAthleteId();
+
+  const stats = await db
+    .select()
+    .from(weeklyStatsTable)
+    .where(eq(weeklyStatsTable.athleteId, athleteId) as any);
+
+  const weeklyCompleted: Record<number, number> = {};
+  for (const s of stats) {
+    weeklyCompleted[s.week] = s.completedKm;
+  }
+
+  res.json({ weeklyCompleted });
+});
+
+router.post("/procoach/me/push-token", async (req: Request, res: Response) => {
+  const { token } = req.body as { token?: string };
+
+  if (!token) {
+    res.status(400).json({ error: "token is required" });
+    return;
+  }
+
+  await getOrCreateMonoAthleteId();
+
+  await db
+    .update(athletesTable)
+    .set({ expoPushToken: token, updatedAt: new Date() })
+    .where(eq(athletesTable.deviceId, MONO_DEVICE_ID) as any);
+
+  res.json({ registered: true });
+});
+
+router.get("/procoach/me/gel-stock", async (_req: Request, res: Response) => {
+  await ensureGelTables();
+  const athleteId = await getOrCreateMonoAthleteId();
+
+  const rows = await db.execute(
+    sql`SELECT gels_in_stock FROM procoach_gel_stock WHERE athlete_id = ${athleteId} LIMIT 1`
+  ) as { rows: Array<{ gels_in_stock: number | string }> };
+  const gelsInStock = rows.rows[0] ? Number(rows.rows[0].gels_in_stock) : 0;
+  res.json({ gelsInStock });
+});
+
+router.put("/procoach/me/gel-stock", async (req: Request, res: Response) => {
+  await ensureGelTables();
+  const { gelsInStock } = req.body as { gelsInStock?: number };
+  const val = Math.max(0, Math.round(Number(gelsInStock ?? 0)));
+  const athleteId = await getOrCreateMonoAthleteId();
+
+  await db.execute(sql`
+    INSERT INTO procoach_gel_stock (athlete_id, gels_in_stock, updated_at)
+    VALUES (${athleteId}, ${val}, NOW())
+    ON CONFLICT (athlete_id)
+    DO UPDATE SET gels_in_stock = EXCLUDED.gels_in_stock, updated_at = NOW()
+  `);
+  res.json({ gelsInStock: val });
+});
+
+router.post("/procoach/me/gel-usage", async (req: Request, res: Response) => {
+  await ensureGelTables();
+  const { date, context, gelsUsed } = req.body as { date?: string; context?: string; gelsUsed?: number };
+
+  const used = Math.max(0, Math.round(Number(gelsUsed ?? 0)));
+  const entryDate = normalizeEntryDate(String(date ?? new Date().toISOString()));
+  const ctx = String(context ?? "workout").slice(0, 64) || "workout";
+  const athleteId = await getOrCreateMonoAthleteId();
+
+  const beforeRows = await db.execute(
+    sql`SELECT gels_in_stock FROM procoach_gel_stock WHERE athlete_id = ${athleteId} LIMIT 1`
+  ) as { rows: Array<{ gels_in_stock: number | string }> };
+  const before = beforeRows.rows[0] ? Number(beforeRows.rows[0].gels_in_stock) : 0;
+  const after = Math.max(0, before - used);
+
+  await db.execute(sql`
+    INSERT INTO procoach_gel_stock (athlete_id, gels_in_stock, updated_at)
+    VALUES (${athleteId}, ${after}, NOW())
+    ON CONFLICT (athlete_id)
+    DO UPDATE SET gels_in_stock = EXCLUDED.gels_in_stock, updated_at = NOW()
+  `);
+
+  await db.execute(sql`
+    INSERT INTO procoach_gel_usage (athlete_id, entry_date, context, gels_used, created_at)
+    VALUES (${athleteId}, ${entryDate}, ${ctx}, ${used}, NOW())
+  `);
+
+  if (after === 0 && before > 0) {
+    await sendTelegram(`⚠️ *GÉIS ZERADOS*\nVocê usou ${used} géis (${ctx}) e seu estoque foi para 0.\nReponha hoje.`);
+  }
+
+  res.json({ gelsInStock: after, gelsUsed: used, entryDate, context: ctx });
+});
+
+router.post("/procoach/me/plan/import-text", async (req: Request, res: Response) => {
+  const body = req.body as any;
+  const raw = typeof body?.text === "string" ? body.text : "";
+  if (!raw.trim()) { res.status(400).json({ error: "text is required" }); return; }
+
+  await ensurePlanTable();
+  const athleteId = await getOrCreateMonoAthleteId();
+
+  const lines = raw.split(/\r?\n/).map((l: string) => l.trim()).filter(Boolean);
+  const year = new Date().getFullYear();
+
+  const parsed = lines.map((line: string) => {
+    const m = line.match(/^(\d{2}\/\d{2})(?:\/(\d{4}))?\s*-\s*(.*)$/);
+    if (!m) return null;
+    const [, ddmm, yyyy, rest] = m;
+    const [dd, mm] = ddmm.split("/").map(Number);
+    const y = yyyy ? Number(yyyy) : year;
+    if (!dd || !mm || !y) return null;
+    const sessionDate = `${y}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+    return { sessionDate, rest: String(rest ?? "").trim() };
+  }).filter(Boolean) as Array<{ sessionDate: string; rest: string }>;
+
+  const sessions = parsed.map((p) => {
+    const activity = p.rest.split("|")[0]?.trim() ?? p.rest;
+    const structure = p.rest.includes("|") ? p.rest.split("|").slice(1).join("|").trim() : null;
+    const plannedKm = parsePlannedKmFromStrings(activity, structure, null);
+    return {
+      sessionDate: p.sessionDate,
+      dayName: null as string | null,
+      activity,
+      paceTarget: null as string | null,
+      treadmillSpeed: null as string | null,
+      restInterval: null as string | null,
+      structure,
+      plannedKm,
+    };
+  });
+
+  if (sessions.length === 0) { res.status(400).json({ error: "no sessions parsed" }); return; }
+
+  for (const s of sessions) {
+    await db.execute(sql`
+      INSERT INTO procoach_plan_sessions
+        (athlete_id, session_date, day_name, activity, pace_target, treadmill_speed, rest_interval, structure, planned_km, created_at, updated_at)
+      VALUES
+        (${athleteId}, ${s.sessionDate}, ${s.dayName}, ${s.activity}, ${s.paceTarget}, ${s.treadmillSpeed}, ${s.restInterval}, ${s.structure}, ${s.plannedKm}, NOW(), NOW())
+      ON CONFLICT (athlete_id, session_date)
+      DO UPDATE SET
+        day_name = EXCLUDED.day_name,
+        activity = EXCLUDED.activity,
+        pace_target = EXCLUDED.pace_target,
+        treadmill_speed = EXCLUDED.treadmill_speed,
+        rest_interval = EXCLUDED.rest_interval,
+        structure = EXCLUDED.structure,
+        planned_km = EXCLUDED.planned_km,
+        updated_at = NOW()
+    `);
+  }
+
+  res.json({
+    imported: sessions.length,
+    year,
+    firstDate: sessions[0]!.sessionDate,
+    lastDate: sessions[sessions.length - 1]!.sessionDate,
+  });
+});
+
+router.post("/procoach/me/plan/import-json", async (req: Request, res: Response) => {
+  const body = req.body as any;
+  const plan = body?.plano_treinamento ?? body?.planoTreinamento ?? body;
+  const cronograma = plan?.cronograma;
+  if (!Array.isArray(cronograma) || cronograma.length === 0) {
+    res.status(400).json({ error: "cronograma is required" });
+    return;
+  }
+
+  await ensurePlanTable();
+  const athleteId = await getOrCreateMonoAthleteId();
+
+  const sessions = cronograma
+    .map((s: any) => {
+      const rawDate = String(s?.data ?? "").trim();
+      const sessionDate = /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate : normalizeEntryDate(rawDate);
+      const dayName = s?.dia_semana ? String(s.dia_semana).trim() : "";
+      const activity = String(s?.atividade ?? "").trim();
+      const paceTarget = s?.pace_alvo ? String(s.pace_alvo).trim() : null;
+      const restInterval = s?.repouso ? String(s.repouso).trim() : null;
+      const structure = s?.estrutura ? String(s.estrutura).trim() : null;
+      const distanceRaw = s?.distancia ? String(s.distancia).trim() : null;
+      const treadmillRaw = s?.velocidade_esteira_kmh;
+      const treadmillSpeed =
+        treadmillRaw === undefined || treadmillRaw === null || treadmillRaw === ""
+          ? null
+          : typeof treadmillRaw === "number"
+            ? `${treadmillRaw} km/h`
+            : String(treadmillRaw).trim();
+      if (!activity || !sessionDate) return null;
+      const plannedKm = parsePlannedKmFromStrings(activity, structure, distanceRaw);
+      return {
+        sessionDate,
+        dayName: dayName || null,
+        activity,
+        paceTarget: paceTarget && paceTarget !== "-" ? paceTarget : null,
+        treadmillSpeed,
+        restInterval: restInterval && restInterval !== "-" ? restInterval : null,
+        structure,
+        plannedKm,
+      };
+    })
+    .filter(Boolean) as Array<{
+      sessionDate: string;
+      dayName: string | null;
+      activity: string;
+      paceTarget: string | null;
+      treadmillSpeed: string | null;
+      restInterval: string | null;
+      structure: string | null;
+      plannedKm: number;
+    }>;
+
+  if (sessions.length === 0) { res.status(400).json({ error: "no sessions parsed" }); return; }
+
+  for (const s of sessions) {
+    await db.execute(sql`
+      INSERT INTO procoach_plan_sessions
+        (athlete_id, session_date, day_name, activity, pace_target, treadmill_speed, rest_interval, structure, planned_km, created_at, updated_at)
+      VALUES
+        (${athleteId}, ${s.sessionDate}, ${s.dayName}, ${s.activity}, ${s.paceTarget}, ${s.treadmillSpeed}, ${s.restInterval}, ${s.structure}, ${s.plannedKm}, NOW(), NOW())
+      ON CONFLICT (athlete_id, session_date)
+      DO UPDATE SET
+        day_name = EXCLUDED.day_name,
+        activity = EXCLUDED.activity,
+        pace_target = EXCLUDED.pace_target,
+        treadmill_speed = EXCLUDED.treadmill_speed,
+        rest_interval = EXCLUDED.rest_interval,
+        structure = EXCLUDED.structure,
+        planned_km = EXCLUDED.planned_km,
+        updated_at = NOW()
+    `);
+  }
+
+  res.json({
+    imported: sessions.length,
+    firstDate: sessions[0]!.sessionDate,
+    lastDate: sessions[sessions.length - 1]!.sessionDate,
+  });
+});
+
+router.get("/procoach/me/plan", async (req: Request, res: Response) => {
+  const from = typeof req.query.from === "string" ? req.query.from : undefined;
+  const to = typeof req.query.to === "string" ? req.query.to : undefined;
+  await ensurePlanTable();
+  const athleteId = await getOrCreateMonoAthleteId();
+
+  const rows = await db.execute(sql`
+    SELECT session_date, day_name, activity, pace_target, treadmill_speed, rest_interval, structure, planned_km
+    FROM procoach_plan_sessions
+    WHERE athlete_id = ${athleteId}
+      AND (${from ?? null} IS NULL OR session_date >= ${from ?? null})
+      AND (${to ?? null} IS NULL OR session_date <= ${to ?? null})
+    ORDER BY session_date ASC
+  `) as { rows: Array<Record<string, unknown>> };
+
+  res.json({ sessions: rows.rows });
+});
+
+router.get("/procoach/me/plan/today", async (req: Request, res: Response) => {
+  const date = typeof req.query.date === "string" && req.query.date.trim() ? req.query.date.trim() : getSaoPauloDayKey();
+  await ensurePlanTable();
+  const athleteId = await getOrCreateMonoAthleteId();
+
+  const rows = await db.execute(sql`
+    SELECT session_date, day_name, activity, pace_target, treadmill_speed, rest_interval, structure, planned_km
+    FROM procoach_plan_sessions
+    WHERE athlete_id = ${athleteId} AND session_date = ${date}
+    LIMIT 1
+  `) as { rows: Array<Record<string, unknown>> };
+
+  res.json({ session: rows.rows[0] ?? null });
+});
+
+router.get("/procoach/me/plan/next", async (req: Request, res: Response) => {
+  const from = typeof req.query.from === "string" && req.query.from.trim() ? req.query.from.trim() : getSaoPauloDayKey();
+  await ensurePlanTable();
+  const athleteId = await getOrCreateMonoAthleteId();
+
+  const rows = await db.execute(sql`
+    SELECT session_date, day_name, activity, pace_target, treadmill_speed, rest_interval, structure, planned_km
+    FROM procoach_plan_sessions
+    WHERE athlete_id = ${athleteId} AND session_date > ${from}
+    ORDER BY session_date ASC
+    LIMIT 1
+  `) as { rows: Array<Record<string, unknown>> };
+
+  res.json({ session: rows.rows[0] ?? null });
+});
+
+router.get("/procoach/me/compliance", async (req: Request, res: Response) => {
+  const from = typeof req.query.from === "string" && req.query.from.trim() ? req.query.from.trim() : undefined;
+  const to = typeof req.query.to === "string" && req.query.to.trim() ? req.query.to.trim() : getSaoPauloDayKey();
+  const fromSafe = from ?? to;
+  await ensurePlanTable();
+  const athleteId = await getOrCreateMonoAthleteId();
+
+  const planned = await db.execute(sql`
+    SELECT COUNT(*)::int AS planned_sessions, COALESCE(SUM(planned_km), 0)::int AS planned_km
+    FROM procoach_plan_sessions
+    WHERE athlete_id = ${athleteId}
+      AND session_date >= ${fromSafe}
+      AND session_date <= ${to}
+  `) as { rows: Array<{ planned_sessions: number; planned_km: number }> };
+
+  const completed = await db.execute(sql`
+    SELECT COUNT(*)::int AS completed_sessions, COALESCE(SUM(distance_km), 0)::int AS completed_km
+    FROM procoach_workout_entries
+    WHERE athlete_id = ${athleteId}
+      AND entry_date >= ${fromSafe}
+      AND entry_date <= ${to}
+  `) as { rows: Array<{ completed_sessions: number; completed_km: number }> };
+
+  res.json({
+    from: fromSafe,
+    to,
+    plannedSessions: planned.rows[0]?.planned_sessions ?? 0,
+    plannedKm: planned.rows[0]?.planned_km ?? 0,
+    completedSessions: completed.rows[0]?.completed_sessions ?? 0,
+    completedKm: completed.rows[0]?.completed_km ?? 0,
+  });
+});
+
+router.post("/procoach/me/bioimpedance", async (req: Request, res: Response) => {
+  await ensureBioimpedanceTable();
+  const athleteId = await getOrCreateMonoAthleteId();
+
+  const body = req.body as Record<string, unknown>;
+  const entryDate = normalizeEntryDate(String(body.date ?? body.entryDate ?? ""));
+  const weightKg = asNumberOrNull(body.weight ?? body.weight_kg ?? body.weightKg);
+  const bodyFatPct = asNumberOrNull(body.body_fat ?? body.body_fat_pct ?? body.bodyFat ?? body.bodyFatPct);
+  const muscleMassKg = asNumberOrNull(body.muscle_mass ?? body.muscle_mass_kg ?? body.muscleMass ?? body.muscleMassKg);
+  const bodyWaterPct = asNumberOrNull(body.body_water ?? body.body_water_pct ?? body.bodyWater ?? body.bodyWaterPct);
+  const visceralFat = asNumberOrNull(body.visceral_fat ?? body.visceralFat);
+  const metabolicAgeRaw = asNumberOrNull(body.metabolic_age ?? body.metabolicAge);
+  const tmbRaw = asNumberOrNull(body.tmb ?? body.tmb_kcal ?? body.tmbKcal);
+  const proteinPct = asNumberOrNull(body.protein ?? body.protein_pct ?? body.proteinPct);
+  const boneMassKg = asNumberOrNull(body.bone_mass ?? body.bone_mass_kg ?? body.boneMass ?? body.boneMassKg);
+  const healthNotes =
+    typeof body.health_notes === "string"
+      ? body.health_notes
+      : typeof body.healthNotes === "string"
+        ? body.healthNotes
+        : typeof body.notes === "string"
+          ? body.notes
+          : null;
+
+  const metabolicAge = metabolicAgeRaw === null ? null : Math.max(0, Math.round(metabolicAgeRaw));
+  const tmbKcal = tmbRaw === null ? null : Math.max(0, Math.round(tmbRaw));
+
+  const rows = await db.execute(sql`
+    INSERT INTO procoach_bioimpedance (
+      athlete_id, entry_date, weight_kg, body_fat_pct, muscle_mass_kg, body_water_pct, visceral_fat,
+      metabolic_age, tmb_kcal, protein_pct, bone_mass_kg, health_notes, created_at, updated_at
+    )
+    VALUES (
+      ${athleteId}, ${entryDate}, ${weightKg}, ${bodyFatPct}, ${muscleMassKg}, ${bodyWaterPct}, ${visceralFat},
+      ${metabolicAge}, ${tmbKcal}, ${proteinPct}, ${boneMassKg}, ${healthNotes}, NOW(), NOW()
+    )
+    ON CONFLICT (athlete_id, entry_date)
+    DO UPDATE SET
+      weight_kg = EXCLUDED.weight_kg,
+      body_fat_pct = EXCLUDED.body_fat_pct,
+      muscle_mass_kg = EXCLUDED.muscle_mass_kg,
+      body_water_pct = EXCLUDED.body_water_pct,
+      visceral_fat = EXCLUDED.visceral_fat,
+      metabolic_age = EXCLUDED.metabolic_age,
+      tmb_kcal = EXCLUDED.tmb_kcal,
+      protein_pct = EXCLUDED.protein_pct,
+      bone_mass_kg = EXCLUDED.bone_mass_kg,
+      health_notes = EXCLUDED.health_notes,
+      updated_at = NOW()
+    RETURNING
+      entry_date, weight_kg, body_fat_pct, muscle_mass_kg, body_water_pct, visceral_fat, metabolic_age, tmb_kcal, protein_pct, bone_mass_kg, health_notes, updated_at
+  `) as { rows: Array<Record<string, unknown>> };
+
+  res.json({ entry: rows.rows[0] ?? null });
+});
+
+router.get("/procoach/me/bioimpedance", async (req: Request, res: Response) => {
+  const limitParam = Math.max(1, Math.min(90, Number(req.query.limit) || 30));
+  await ensureBioimpedanceTable();
+  const athleteId = await getOrCreateMonoAthleteId();
+
+  const rows = await db.execute(sql`
+    SELECT
+      entry_date, weight_kg, body_fat_pct, muscle_mass_kg, body_water_pct, visceral_fat, metabolic_age, tmb_kcal, protein_pct, bone_mass_kg, health_notes, updated_at
+    FROM procoach_bioimpedance
+    WHERE athlete_id = ${athleteId}
+    ORDER BY entry_date DESC
+    LIMIT ${limitParam}
+  `) as { rows: Array<Record<string, unknown>> };
+
+  res.json({ entries: rows.rows });
 });
 
 router.get("/procoach/athletes/:deviceId", async (req: Request, res: Response) => {
@@ -658,6 +1194,39 @@ router.get("/procoach/athletes/:deviceId/plan/today", async (req: Request, res: 
     SELECT session_date, day_name, activity, pace_target, treadmill_speed, rest_interval, structure, planned_km
     FROM procoach_plan_sessions
     WHERE athlete_id = ${athleteId} AND session_date = ${date}
+    LIMIT 1
+  `) as { rows: Array<{
+    session_date: string;
+    day_name: string | null;
+    activity: string;
+    pace_target: string | null;
+    treadmill_speed: string | null;
+    rest_interval: string | null;
+    structure: string | null;
+    planned_km: number | string;
+  }> };
+
+  res.json({ session: rows.rows[0] ?? null });
+});
+
+router.get("/procoach/athletes/:deviceId/plan/next", async (req: Request, res: Response) => {
+  const deviceId = String(req.params.deviceId);
+  const from = typeof req.query.from === "string" && req.query.from.trim() ? req.query.from.trim() : getSaoPauloDayKey();
+  await ensurePlanTable();
+
+  const athletes = await db
+    .select({ id: athletesTable.id })
+    .from(athletesTable)
+    .where(eq(athletesTable.deviceId, deviceId) as any)
+    .limit(1);
+  if (athletes.length === 0) { res.status(404).json({ error: "Athlete not found" }); return; }
+  const athleteId = athletes[0]!.id;
+
+  const rows = await db.execute(sql`
+    SELECT session_date, day_name, activity, pace_target, treadmill_speed, rest_interval, structure, planned_km
+    FROM procoach_plan_sessions
+    WHERE athlete_id = ${athleteId} AND session_date > ${from}
+    ORDER BY session_date ASC
     LIMIT 1
   `) as { rows: Array<{
     session_date: string;

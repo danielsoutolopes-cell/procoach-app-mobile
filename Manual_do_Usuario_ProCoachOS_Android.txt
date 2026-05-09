@@ -1,5 +1,5 @@
 MANUAL DO USUÁRIO (ANDROID) — PROCOACH OS
-Versão do app: ProCoach OS V5.1
+Versão do app: ProCoach OS V5.3
 Perfil do usuário: Treinos de corrida + academia
 
 
@@ -10,13 +10,10 @@ Perfil do usuário: Treinos de corrida + academia
 2. Aguarde a tela inicial carregar.
 
 O que você deve ver (esperado):
-- Título “PROCOACH OS V5.1”
+- Título “PROCOACH OS V5.3”
 - Data do dia
 - “DIAS P/ PROVA”
 - Cards “PREVISÃO DE HOJE” e “TREINO DO DIA”
-
-Se aparecer mensagem pedindo para reabrir:
-- Feche o app e abra novamente (isso ajuda a gerar o deviceId e completar a sincronização inicial).
 
 
 1.2 Ajustar seu nome (Perfil)
@@ -31,12 +28,13 @@ O que você deve ver (esperado):
 
 2) COMO FUNCIONA O PROCOACH OS (CONCEITOS IMPORTANTES)
 
-2.1 deviceId (seu identificador)
-- O app usa um identificador (deviceId) para salvar seus dados no servidor (Neon).
-- Você não precisa digitar isso no dia a dia. Ele é gerado/guardado pelo app.
+2.1 Mono usuário (sem login)
+- O app é mono usuário: não existe autenticação e você não precisa “logar”.
+- Seus dados são salvos no servidor (Neon) automaticamente.
 
 2.2 Prova Alvo (regra)
 - A Prova Alvo exibida no app deve ser sempre a próxima prova “P1” (pela data).
+- Na tela de Provas, você vê “Próxima prova” e “Próxima P1 (alvo)”.
 
 2.3 Treino do Dia x Plano Importado
 - Treino do dia: o treino que aparece para você executar hoje (pode ser do app/IA).
@@ -140,7 +138,7 @@ Dica:
 - Seja consistente: use a mesma lógica toda semana.
 
 
-6) ABA STATUS — PLANO, COMPLIANCE, ESTOQUE E CONFIGURAÇÕES
+6) ABA STATUS — PLANO, COMPLIANCE, ESTOQUE E BIOIMPEDÂNCIA
 
 6.1 Importar Plano (JSON) — jeito mais fácil
 Use isso quando você tem seu plano em JSON (como o “plano_treinamento”).
@@ -190,56 +188,86 @@ O que você deve ver (esperado):
 - Quantidade atualiza e fica salva.
 
 
+6.5 Bioimpedância (V5.2)
+Passo a passo:
+1. Na aba “Status”, procure “BIOIMPEDÂNCIA (V5.2)”.
+2. Cole um JSON com pelo menos o campo “date” (YYYY-MM-DD).
+3. Toque em “SALVAR NO NEON”.
+4. Toque no refresh para listar os últimos registros.
+
+O que você deve ver (esperado):
+- Mensagem “Bioimpedância salva no Neon.”
+- Lista com os últimos registros (data, peso, % gordura, etc.).
+
+
 7) STRAVA — CONECTAR E SINCRONIZAR (USO DIÁRIO)
 
 7.1 Conectar
-1. Vá no card/área do Strava (onde estiver disponível).
-2. Toque em “Conectar”.
-3. O app abre o navegador para autorizar.
-4. Conclua o login e aceite.
+- Ao abrir o app, ele tenta iniciar a conexão automaticamente.
+- Se não conectar, use o card do Strava e toque em “CONECTAR”.
 
-O que você deve ver (esperado):
-- Após autorizar, o app passa a indicar “Conectado”.
+Passo a passo:
+1. Toque em “CONECTAR”.
+2. O app abre o navegador para autorizar.
+3. Conclua o login e aceite.
+4. Volte ao app e aguarde alguns segundos até aparecer “CONECTADO”.
 
 Se aparecer erro de redirect:
-- Isso é configuração do Strava no servidor. Envie a mensagem do erro para suporte (sem tokens).
+- Isso é configuração do Strava no servidor (redirect_uri). Envie a mensagem do erro para suporte (sem tokens).
 
 
 7.2 Sincronizar
-1. Toque em “Sincronizar”.
+1. Toque em “SINCRONIZAR”.
 2. Aguarde.
 
 O que você deve ver (esperado):
 - Mensagem de sucesso e/ou “importado X”.
 
 
-8) SPOTIFY — CONECTAR E USAR
+8) SPOTIFY — PLAYLIST DO TREINO
 
-8.1 Conectar
-1. Abra o card do Spotify.
-2. Toque em conectar/autorizar.
-3. Finalize no navegador.
+Como funciona:
+- O card do Spotify sugere uma playlist baseada no tipo de treino do dia.
+- Não existe “login do usuário” no app: a busca é feita pelo servidor via credenciais do Spotify.
 
-Se não entrar:
-- Anote a mensagem de erro mostrada no app e envie para suporte.
+Se não carregar:
+- Verifique se aparece uma mensagem de erro no card.
+- Em geral, isso indica que as credenciais do Spotify não estão configuradas no servidor.
 
 
-9) TELEGRAM — ALERTAS
+9) PRÓXIMO TREINO (TELA)
+
+Para que serve:
+- Ver o próximo treino do plano importado + clima do dia desse treino.
+
+Passo a passo:
+1. Abra a aba “Próximo”.
+2. Veja “PRÓXIMA SESSÃO” (data, atividade, pace/estrutura, km).
+3. Veja “CLIMA” (mín/máx, chuva, vento) para o dia do treino.
+4. Use o botão de “refresh” para atualizar.
+
+Se aparecer “Nenhum próximo treino encontrado”:
+- Importe o plano na aba Status.
+
+
+10) TELEGRAM — ALERTAS E BRIEFING NOTURNO
 
 O Telegram é usado para alertas automáticos (quando configurado no servidor).
 Exemplos:
 - Estoque de géis zerou → alerta imediato.
+- Briefing do próximo treino às 22h → mensagem com o treino e clima (se o agendamento/cron estiver ativo no servidor).
 
 Se você não recebeu nada:
-- Pode não haver rotina diária configurada, ou o servidor não está configurado para seu chat.
+- Pode não haver rotina/cron configurada.
+- Pode faltar configuração do chat/token no servidor.
 
 
-10) ANDROID — PERMISSÕES IMPORTANTES (NOTIFICAÇÃO)
+11) ANDROID — PERMISSÕES IMPORTANTES (NOTIFICAÇÃO)
 
-10.1 Permitir notificações
+11.1 Permitir notificações
 1. Android: Ajustes do sistema → Apps → ProCoach OS → Notificações → Permitir.
 
-10.2 Economia de bateria (recomendado)
+11.2 Economia de bateria (recomendado)
 Se você quer notificações confiáveis:
 1. Ajustes → Bateria → Economia de bateria
 2. Excluir o ProCoach OS de otimizações (varia por fabricante)
@@ -248,33 +276,42 @@ Se não fizer isso:
 - Alguns Android “matam” o app em segundo plano e notificações atrasam.
 
 
-11) PROBLEMAS COMUNS (RESOLUÇÃO RÁPIDA)
+12) PROBLEMAS COMUNS (RESOLUÇÃO RÁPIDA)
 
-11.1 “Concluí o treino e voltou em aberto”
+12.1 “Concluí o treino e voltou em aberto”
 Checklist:
 - Feche e abra o app.
 - Confirme data/hora do celular.
 - Conclua novamente e faça o Debrief.
 
-11.2 “Plano de hoje não aparece”
+12.2 “Plano de hoje não aparece”
 Checklist:
 - Aba Status → “VERIFICAR PLANO IMPORTADO” (tem lista?)
 - Se tem lista, mas hoje não aparece: talvez hoje não exista entrada no cronograma.
 
-11.3 “Não consigo importar o JSON”
+12.3 “Erro 404 ao importar plano/bioimpedância”
 Checklist:
-- Cole o JSON completo (com { e }).
-- Não cole só um pedaço do cronograma; cole tudo.
-- Se der erro, copie a mensagem do erro e envie para suporte (sem segredos).
+- Confirme que você está usando a versão V5.3 ou superior do app.
+- Confirme que o app aponta para o servidor correto (EXPO_PUBLIC_API_URL).
+- Se persistir, copie a mensagem do erro e envie para suporte (sem segredos).
 
-11.4 “Não recebo notificações”
+12.4 “Strava não conecta/sincroniza”
 Checklist:
-- Android → Permitir notificações.
-- Remover restrição de bateria.
-- No app, use a notificação de teste (se disponível).
+- Confirme se o servidor está configurado (STRAVA_CLIENT_ID/SECRET e redirect_uri correto).
+- Tente “CONECTAR” novamente e aguarde voltar para “CONECTADO”.
+- Tente “SINCRONIZAR” e veja se importou atividades.
+
+12.5 “Spotify não funciona”
+Checklist:
+- Se o card mostrar erro 503/“não configurado”, falta configurar SPOTIFY_CLIENT_ID/SECRET no servidor.
+
+12.6 “Não recebo mensagens do Telegram”
+Checklist:
+- Verifique permissões de notificação no Android (se aplicável).
+- Verifique se o agendamento/cron do servidor está ativo (daily e nightly 22h).
 
 
-12) SEGURANÇA (MUITO IMPORTANTE)
+13) SEGURANÇA (MUITO IMPORTANTE)
 
 - Não compartilhe tokens, client secret, URLs de banco ou credenciais em mensagens.
 - Se você já compartilhou algum segredo, trate como comprometido e faça rotação.

@@ -122,6 +122,14 @@ export default function CheckInScreen() {
   const [bioEntries, setBioEntries] = useState<Array<Record<string, unknown>>>([]);
   const latestBio = bioEntries[0] as any | undefined;
 
+  const [stravaDiagLoading, setStravaDiagLoading] = useState(false);
+  const [stravaDiag, setStravaDiag] = useState<null | {
+    configured: boolean;
+    connected: boolean;
+    redirectUri: string;
+    lastSyncAt: string | null;
+  }>(null);
+
   // ── Notification state ─────────────────────────────────────────────────────
   const supported = notificationsSupported();
   const [weeklyPrefs, setWeeklyPrefs] = useState<WeeklyReportPrefs>({ enabled: false, hour: 9, minute: 0 });
@@ -162,6 +170,22 @@ export default function CheckInScreen() {
   useEffect(() => {
     refreshCompliance();
   }, [refreshCompliance]);
+
+  const refreshStravaDiag = useCallback(async () => {
+    setStravaDiagLoading(true);
+    try {
+      const r = await ProCoachAPI.stravaDiagnostics();
+      setStravaDiag(r);
+    } catch {
+      setStravaDiag(null);
+    } finally {
+      setStravaDiagLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshStravaDiag();
+  }, [refreshStravaDiag]);
 
   const refreshBio = useCallback(async () => {
     setBioLoading(true);
@@ -800,6 +824,37 @@ export default function CheckInScreen() {
           ) : (
             <Text style={{ fontSize: 12, color: colors.mutedForeground, lineHeight: 16 }}>
               Sem dados ainda. Importe o plano e marque treinos como concluídos.
+            </Text>
+          )}
+        </View>
+
+        <View style={s.card}>
+          <View style={s.cardTitleRow}>
+            <Text style={s.cardTitle}>STRAVA (DIAGNÓSTICO)</Text>
+            <Pressable onPress={refreshStravaDiag} disabled={stravaDiagLoading}>
+              {stravaDiagLoading ? (
+                <ActivityIndicator size="small" color={colors.mutedForeground} />
+              ) : (
+                <Feather name="refresh-cw" size={14} color={colors.mutedForeground} />
+              )}
+            </Pressable>
+          </View>
+          <View style={s.divider} />
+          {stravaDiag ? (
+            <>
+              <Text style={{ fontSize: 11, color: colors.mutedForeground, lineHeight: 16 }}>
+                Configurado: {stravaDiag.configured ? "SIM" : "NÃO"}{"\n"}
+                Conectado: {stravaDiag.connected ? "SIM" : "NÃO"}{"\n"}
+                Último sync: {stravaDiag.lastSyncAt ? stravaDiag.lastSyncAt : "—"}
+              </Text>
+              <View style={{ height: 10 }} />
+              <Text style={{ fontSize: 10, color: colors.mutedForeground, lineHeight: 15 }}>
+                redirect_uri: {stravaDiag.redirectUri}
+              </Text>
+            </>
+          ) : (
+            <Text style={{ fontSize: 12, color: colors.mutedForeground, lineHeight: 16 }}>
+              Não foi possível consultar o diagnóstico do Strava agora.
             </Text>
           )}
         </View>

@@ -61,4 +61,22 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
+
+  if (process.env.PROCOACH_INTERNAL_CRON === "1") {
+    void (async () => {
+      const { runNightlyBriefing } = await import("./routes/telegram");
+      let lastRunDay = "";
+      setInterval(() => {
+        const now = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+        const dayKey = now.toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+        const h = now.getHours();
+        const m = now.getMinutes();
+        if (h === 22 && m === 0 && lastRunDay !== dayKey) {
+          lastRunDay = dayKey;
+          void runNightlyBriefing();
+        }
+      }, 60_000);
+      logger.info({ tz: "America/Sao_Paulo" }, "Internal cron enabled");
+    })();
+  }
 });

@@ -79,6 +79,13 @@ export interface SpotifyPlaylist {
   owner: string;
 }
 
+export interface StravaDiagnostics {
+  configured: boolean;
+  connected: boolean;
+  redirectUri: string;
+  lastSyncAt: string | null;
+}
+
 // -----------------------------------------------------------------------------
 // MÓDULOS DA API (SERVIÇOS DE TELEMETRIA)
 // -----------------------------------------------------------------------------
@@ -299,6 +306,10 @@ export const ProCoachAPI = {
       `/strava/connect-url`
     );
     return res.url;
+  },
+
+  async stravaDiagnostics() {
+    return request<StravaDiagnostics>(`/strava/diagnostics`);
   },
 
   // --- NOTIFICAÇÕES TÁTICAS ---

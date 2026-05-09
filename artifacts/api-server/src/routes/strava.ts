@@ -181,6 +181,22 @@ router.get("/strava/configured", (_req: Request, res: Response) => {
   res.json({ configured: isConfigured() });
 });
 
+router.get("/strava/diagnostics", async (req: Request, res: Response) => {
+  const configured = isConfigured();
+  const redirectUri = getRedirectUri(req);
+  const athlete = await getAthleteByDeviceId(MONO_DEVICE_ID);
+  const connectedRow = athlete
+    ? await db.select().from(stravaTokensTable).where(eq(stravaTokensTable.athleteId, athlete.id)).limit(1)
+    : [];
+  const connected = Boolean(connectedRow[0]);
+  res.json({
+    configured,
+    connected,
+    redirectUri,
+    lastSyncAt: connectedRow[0]?.lastSyncAt?.toISOString() ?? null,
+  });
+});
+
 router.get("/strava/connect-url", async (req: Request, res: Response) => {
   if (!isConfigured()) { res.status(503).json({ error: "Strava não configurado. Adicione STRAVA_CLIENT_ID e STRAVA_CLIENT_SECRET." }); return; }
   const { deviceId: raw } = req.query as { deviceId?: string };

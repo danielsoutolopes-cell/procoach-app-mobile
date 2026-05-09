@@ -1195,6 +1195,14 @@ router.post("/telegram/nightly", async (req: Request, res: Response) => {
   if (provided !== secret) { res.status(401).json({ error: "unauthorized" }); return; }
 
   res.json({ ok: true });
+  void runNightlyBriefing();
+});
+
+export async function runNightlyBriefing(): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) return;
+
   try {
     const athlete = await getPrimaryAthlete();
     if (!athlete) {
@@ -1247,6 +1255,6 @@ router.post("/telegram/nightly", async (req: Request, res: Response) => {
   } catch (err) {
     console.error("[Telegram nightly error]", err);
   }
-});
+}
 
 export default router;

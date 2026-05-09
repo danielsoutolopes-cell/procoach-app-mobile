@@ -2,6 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import * as WebBrowser from "expo-web-browser";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useRouter } from "expo-router";
 import {
   ActivityIndicator,
   Alert,
@@ -14,7 +15,8 @@ import {
 } from "react-native";
 
 import { useColors } from "@/hooks/useColors";
-import { ProCoachAPI } from "@/services/api";
+import { ProCoachAPI, type Shoe } from "@/services/api";
+import ShoePickerModal, { isActiveShoe } from "@/components/ShoePickerModal";
 
 interface StravaStatus {
   connected: boolean;
@@ -32,11 +34,17 @@ function getSaoPauloDayKey(): string {
 
 export function StravaCard({ onSyncComplete }: Props) {
   const colors = useColors();
+  const router = useRouter();
   const [status, setStatus] = useState<StravaStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const appStateRef = useRef(AppState.currentState);
+
+  const [shoes, setShoes] = useState<Shoe[]>([]);
+  const [pendingShoe, setPendingShoe] = useState<any[]>([]);
+  const [pendingIdx, setPendingIdx] = useState(0);
+  const [shoeModalOpen, setShoeModalOpen] = useState(false);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -125,7 +133,14 @@ export function StravaCard({ onSyncComplete }: Props) {
       const result = await ProCoachAPI.stravaSync();
       await fetchStatus();
       onSyncComplete?.();
-      if (Platform.OS !== "web") {
+      const pending = Array.isArray((result as any).pendingShoe) ? (result as any).pendingShoe : [];
+      if (pending.length > 0) {
+        const r = await ProCoachAPI.getShoes().catch(() => ({ shoes: [] as Shoe[] }));
+        setShoes(Array.isArray(r.shoes) ? r.shoes : []);
+        setPendingShoe(pending);
+        setPendingIdx(0);
+        setShoeModalOpen(true);
+      } else if (Platform.OS !== "web") {
         Alert.alert(
           "Sincronização Completa",
           result.imported > 0
@@ -141,6 +156,40 @@ export function StravaCard({ onSyncComplete }: Props) {
     }
     setSyncing(false);
   }, [fetchStatus, onSyncComplete]);
+
+  const activeShoes = shoes.filter(isActiveShoe);
+  const currentPending = pendingShoe[pendingIdx];
+  const pendingTitle = currentPending
+    ? `SELECIONE O TÊNIS (${pendingIdx + 1}/${pendingShoe.length})`
+    : "SELECIONE O TÊNIS";
+  const pendingSubtitle = currentPending
+    ? `Treino novo do Strava: ${currentPending.entry_date ?? currentPending.entryDate ?? "—"} · ${currentPending.distance_km ?? currentPending.distanceKm ?? "—"}km`
+    : undefined;
+
+  const closePending = () => {
+    setShoeModalOpen(false);
+    setPendingShoe([]);
+    setPendingIdx(0);
+  };
+
+  const handleSelectShoe = async (shoe: Shoe) => {
+    if (!currentPending) return;
+    const workoutId = Number(currentPending.id);
+    if (!Number.isFinite(workoutId)) return;
+    try {
+      await ProCoachAPI.setWorkoutShoe(workoutId, Number((shoe as any).id));
+      const next = pendingIdx + 1;
+      if (next >= pendingShoe.length) {
+        closePending();
+        await fetchStatus();
+        onSyncComplete?.();
+      } else {
+        setPendingIdx(next);
+      }
+    } catch (e: any) {
+      Alert.alert("Tênis", e?.message ?? "Falha ao salvar o tênis.");
+    }
+  };
 
   const handleDisconnect = useCallback(async () => {
     const confirmed = Platform.OS === "web"
@@ -239,6 +288,27 @@ export function StravaCard({ onSyncComplete }: Props) {
 
   return (
     <View style={s.card}>
+      <ShoePickerModal
+        visible={shoeModalOpen}
+        title={pendingTitle}
+        subtitle={pendingSubtitle}
+        shoes={shoes}
+        onSelectShoe={handleSelectShoe}
+        onClose={() => {
+          // fluxo é obrigatório: só permite fechar se não houver pendências ou se não houver tênis cadastrado
+          if (pendingShoe.length > 0 && activeShoes.length > 0) return;
+          closePending();
+        }}
+        primaryActionLabel={activeShoes.length === 0 ? "IR PARA TÊNIS" : undefined}
+        onPrimaryAction={
+          activeShoes.length === 0
+            ? () => {
+                closePending();
+                router.push("/(tabs)/equipamentos");
+              }
+            : undefined
+        }
+      />
       <View style={s.header}>
         <View style={s.stravaLogo}>
           <Text style={{ fontSize: 16 }}>🏃</Text>

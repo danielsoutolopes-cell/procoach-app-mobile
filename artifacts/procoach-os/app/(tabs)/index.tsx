@@ -21,6 +21,9 @@ import { SpotifyPlaylistCard } from "@/components/SpotifyPlaylistCard";
 import { StravaCard } from "@/components/StravaCard";
 import { ProCoachAPI } from "@/services/api";
 import { Race } from "@/context/AthleteContext";
+import ShoePickerModal, { isActiveShoe } from "@/components/ShoePickerModal";
+import type { Shoe } from "@/services/api";
+import { useRouter } from "expo-router";
 import {
   formatDistance,
   formatDateBR,
@@ -159,11 +162,15 @@ function promptPain(opts: { onSelect: (pain: number) => void }) {
 export default function DashboardScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const {
     state, markWorkoutComplete, regenerateWorkout,
     recoveryBlock, setRecoveryBlock, clearRecoveryBlock,
   } = useAthlete();
   const { todayWorkout, currentWeek, hrv, painLevel, profile, aiLoading } = state;
+
+  const [shoePickOpen, setShoePickOpen] = React.useState(false);
+  const [shoes, setShoes] = React.useState<Shoe[]>([]);
 
   const [dayWeather, setDayWeather] = React.useState<{
     emoji: string;
@@ -348,11 +355,7 @@ export default function DashboardScreen() {
     return () => { cancelled = true; };
   }, []);
 
-  const handleComplete = async () => {
-    if (todayWorkout.completed) return;
-    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    await markWorkoutComplete();
-
+  const runPostCompleteFlow = async () => {
     const estimatedMin =
       todayWorkout.durationMin > 0
         ? todayWorkout.durationMin
@@ -377,6 +380,40 @@ export default function DashboardScreen() {
     } else {
       requestDebrief("workout");
     }
+  };
+
+  const handleComplete = async () => {
+    if (todayWorkout.completed) return;
+
+    // Corridas: seleção obrigatória de tênis antes de concluir.
+    if (todayWorkout.type === "corrida") {
+      try {
+        const r = await ProCoachAPI.getShoes();
+        const list = Array.isArray(r.shoes) ? r.shoes : [];
+        setShoes(list);
+        const active = list.filter(isActiveShoe);
+        if (active.length === 0) {
+          Alert.alert(
+            "Tênis obrigatório",
+            "Cadastre pelo menos 1 tênis ativo antes de concluir corridas.",
+            [
+              { text: "Cancelar", style: "cancel" },
+              { text: "Ir para Tênis", onPress: () => router.push("/(tabs)/equipamentos") },
+            ]
+          );
+          return;
+        }
+        setShoePickOpen(true);
+        return;
+      } catch (e: any) {
+        Alert.alert("Tênis", e?.message ?? "Falha ao carregar tênis.");
+        return;
+      }
+    }
+
+    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    await markWorkoutComplete();
+    await runPostCompleteFlow();
   };
 
   const s = StyleSheet.create({
@@ -687,6 +724,24 @@ export default function DashboardScreen() {
 
   return (
     <View style={s.container}>
+      <ShoePickerModal
+        visible={shoePickOpen}
+        title="SELECIONE O TÊNIS"
+        subtitle="Para concluir uma corrida, selecione qual tênis foi usado."
+        shoes={shoes}
+        onSelectShoe={async (shoe) => {
+          setShoePickOpen(false);
+          await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          await markWorkoutComplete({ shoeId: Number((shoe as any).id) });
+          await runPostCompleteFlow();
+        }}
+        onClose={() => setShoePickOpen(false)}
+        primaryActionLabel="IR PARA TÊNIS"
+        onPrimaryAction={() => {
+          setShoePickOpen(false);
+          router.push("/(tabs)/equipamentos");
+        }}
+      />
       <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
         <View style={s.header}>
           <View>

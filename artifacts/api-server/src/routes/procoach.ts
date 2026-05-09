@@ -1,14 +1,22 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { eq, and, desc, sql } from "@workspace/db";
 import { db } from "@workspace/db";
+import multer from "multer";
+import pdfParse from "pdf-parse";
 import {
   athletesTable,
+  shoesTable,
   workoutEntriesTable,
   weeklyStatsTable,
   insertAthleteSchema,
 } from "@workspace/db/schema";
 
 const router: IRouter = Router();
+
+const pdfUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+});
 
 const MONO_DEVICE_ID = "mono";
 
@@ -113,6 +121,44 @@ async function ensurePlanTable(): Promise<void> {
       ADD COLUMN IF NOT EXISTS planned_km INTEGER NOT NULL DEFAULT 0
   `);
   planTableReady = true;
+}
+
+let shoesTablesReady = false;
+async function ensureShoesTables(): Promise<void> {
+  if (shoesTablesReady) return;
+
+  // 1) Shoes table
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS procoach_shoes (
+      id SERIAL PRIMARY KEY,
+      athlete_id INTEGER NOT NULL REFERENCES procoach_athletes(id) ON DELETE CASCADE,
+      nickname VARCHAR(120) NOT NULL,
+      brand VARCHAR(80),
+      model VARCHAR(120),
+      start_date VARCHAR(32),
+      initial_km INTEGER NOT NULL DEFAULT 0,
+      target_km INTEGER NOT NULL DEFAULT 500,
+      retired_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  // 2) Workout entries columns (for shoes + origin)
+  await db.execute(sql`
+    ALTER TABLE IF EXISTS procoach_workout_entries
+      ADD COLUMN IF NOT EXISTS shoe_id INTEGER REFERENCES procoach_shoes(id) ON DELETE SET NULL
+  `);
+  await db.execute(sql`
+    ALTER TABLE IF EXISTS procoach_workout_entries
+      ADD COLUMN IF NOT EXISTS source VARCHAR(16) NOT NULL DEFAULT 'manual'
+  `);
+  await db.execute(sql`
+    ALTER TABLE IF EXISTS procoach_workout_entries
+      ADD COLUMN IF NOT EXISTS external_id BIGINT
+  `);
+
+  shoesTablesReady = true;
 }
 
 let bioimpedanceTableReady = false;
@@ -378,7 +424,7 @@ router.get("/procoach/me", async (_req: Request, res: Response) => {
 });
 
 router.post("/procoach/me/workouts", async (req: Request, res: Response) => {
-  const { date, distanceKm, type, durationMin, week, injuryAlert, rpe, painLevel, notes } = req.body as {
+  const { date, distanceKm, type, durationMin, week, injuryAlert, rpe, painLevel, notes, shoeId } = req.body as {
     date: string;
     distanceKm: number;
     type: string;
@@ -388,9 +434,11 @@ router.post("/procoach/me/workouts", async (req: Request, res: Response) => {
     rpe?: number;
     painLevel?: number;
     notes?: string;
+    shoeId?: number | null;
   };
 
   const athleteId = await getOrCreateMonoAthleteId();
+  await ensureShoesTables();
   const roundedKm = roundKm(distanceKm);
   const entryDate = normalizeEntryDate(date);
 
@@ -414,6 +462,9 @@ router.post("/procoach/me/workouts", async (req: Request, res: Response) => {
       type: type as any,
       durationMin,
       week,
+      shoeId: shoeId ?? null,
+      source: "manual",
+      externalId: null,
       injuryAlert: injuryAlert ?? null,
     })
     .returning();
@@ -473,6 +524,196 @@ router.get("/procoach/me/workouts", async (req: Request, res: Response) => {
     .limit(limitParam);
 
   res.json({ entries });
+});
+
+// ─── Shoes (Equipamentos) ─────────────────────────────────────────────────────
+
+router.get("/procoach/me/shoes", async (_req: Request, res: Response) => {
+  const athleteId = await getOrCreateMonoAthleteId();
+  await ensureShoesTables();
+
+  const rows = await db.execute(sql`
+    SELECT
+      s.id,
+      s.nickname,
+      s.brand,
+      s.model,
+      s.start_date,
+      s.initial_km,
+      s.target_km,
+      s.retired_at,
+      s.created_at,
+      s.updated_at,
+      (s.initial_km + COALESCE(SUM(w.distance_km), 0))::int AS km_total,
+      MAX(w.entry_date) AS last_used_at
+    FROM procoach_shoes s
+    LEFT JOIN procoach_workout_entries w
+      ON w.athlete_id = s.athlete_id AND w.shoe_id = s.id
+    WHERE s.athlete_id = ${athleteId}
+    GROUP BY s.id
+    ORDER BY (s.retired_at IS NULL) DESC, s.retired_at DESC NULLS LAST, s.updated_at DESC
+  `) as { rows: Array<Record<string, unknown>> };
+
+  res.json({ shoes: rows.rows });
+});
+
+router.post("/procoach/me/shoes", async (req: Request, res: Response) => {
+  const athleteId = await getOrCreateMonoAthleteId();
+  await ensureShoesTables();
+  const body = req.body as {
+    nickname?: string;
+    brand?: string | null;
+    model?: string | null;
+    startDate?: string | null;
+    initialKm?: number | null;
+    targetKm?: number | null;
+  };
+
+  const nickname = String(body.nickname ?? "").trim();
+  if (!nickname) {
+    res.status(400).json({ error: "nickname é obrigatório" });
+    return;
+  }
+
+  const initialKm = Math.max(0, Math.round(Number(body.initialKm ?? 0)));
+  const targetKm = Math.max(1, Math.round(Number(body.targetKm ?? 500)));
+  const startDate = body.startDate ? String(body.startDate).trim() : null;
+  const brand = body.brand ? String(body.brand).trim() : null;
+  const model = body.model ? String(body.model).trim() : null;
+
+  const [created] = await db
+    .insert(shoesTable)
+    .values({
+      athleteId,
+      nickname,
+      brand,
+      model,
+      startDate,
+      initialKm,
+      targetKm,
+      updatedAt: new Date(),
+    })
+    .returning();
+
+  res.json({ shoe: created });
+});
+
+router.put("/procoach/me/shoes/:id", async (req: Request, res: Response) => {
+  const athleteId = await getOrCreateMonoAthleteId();
+  await ensureShoesTables();
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) {
+    res.status(400).json({ error: "id inválido" });
+    return;
+  }
+
+  const body = req.body as {
+    nickname?: string;
+    brand?: string | null;
+    model?: string | null;
+    startDate?: string | null;
+    initialKm?: number | null;
+    targetKm?: number | null;
+  };
+
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (body.nickname !== undefined) patch.nickname = String(body.nickname ?? "").trim();
+  if (body.brand !== undefined) patch.brand = body.brand ? String(body.brand).trim() : null;
+  if (body.model !== undefined) patch.model = body.model ? String(body.model).trim() : null;
+  if (body.startDate !== undefined) patch.startDate = body.startDate ? String(body.startDate).trim() : null;
+  if (body.initialKm !== undefined) patch.initialKm = Math.max(0, Math.round(Number(body.initialKm ?? 0)));
+  if (body.targetKm !== undefined) patch.targetKm = Math.max(1, Math.round(Number(body.targetKm ?? 500)));
+
+  const [updated] = await db
+    .update(shoesTable)
+    .set(patch as any)
+    .where(and(eq(shoesTable.id, id), eq(shoesTable.athleteId, athleteId)) as any)
+    .returning();
+
+  if (!updated) {
+    res.status(404).json({ error: "Tênis não encontrado" });
+    return;
+  }
+  res.json({ shoe: updated });
+});
+
+router.post("/procoach/me/shoes/:id/archive", async (req: Request, res: Response) => {
+  const athleteId = await getOrCreateMonoAthleteId();
+  await ensureShoesTables();
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) {
+    res.status(400).json({ error: "id inválido" });
+    return;
+  }
+  const [updated] = await db
+    .update(shoesTable)
+    .set({ retiredAt: new Date(), updatedAt: new Date() })
+    .where(and(eq(shoesTable.id, id), eq(shoesTable.athleteId, athleteId)) as any)
+    .returning();
+  if (!updated) {
+    res.status(404).json({ error: "Tênis não encontrado" });
+    return;
+  }
+  res.json({ shoe: updated });
+});
+
+router.get("/procoach/me/workouts/pending-shoe", async (req: Request, res: Response) => {
+  const athleteId = await getOrCreateMonoAthleteId();
+  await ensureShoesTables();
+  const limitParam = Math.max(1, Math.min(50, Number(req.query.limit) || 20));
+
+  const rows = await db.execute(sql`
+    SELECT id, entry_date, distance_km, duration_min
+    FROM procoach_workout_entries
+    WHERE athlete_id = ${athleteId}
+      AND source = 'strava'
+      AND type = 'corrida'
+      AND shoe_id IS NULL
+    ORDER BY entry_date DESC
+    LIMIT ${limitParam}
+  `) as { rows: Array<Record<string, unknown>> };
+
+  res.json({ pending: rows.rows });
+});
+
+router.post("/procoach/me/workouts/:id/set-shoe", async (req: Request, res: Response) => {
+  const athleteId = await getOrCreateMonoAthleteId();
+  await ensureShoesTables();
+
+  const workoutId = Number(req.params.id);
+  const shoeId = Number((req.body as any)?.shoeId);
+  if (!Number.isFinite(workoutId) || !Number.isFinite(shoeId)) {
+    res.status(400).json({ error: "workoutId/shoeId inválidos" });
+    return;
+  }
+
+  const shoes = await db
+    .select({ id: shoesTable.id })
+    .from(shoesTable)
+    .where(and(eq(shoesTable.id, shoeId), eq(shoesTable.athleteId, athleteId)) as any)
+    .limit(1);
+  if (!shoes[0]) {
+    res.status(404).json({ error: "Tênis não encontrado" });
+    return;
+  }
+
+  const workouts = await db
+    .select({ id: workoutEntriesTable.id })
+    .from(workoutEntriesTable)
+    .where(and(eq(workoutEntriesTable.id, workoutId), eq(workoutEntriesTable.athleteId, athleteId)) as any)
+    .limit(1);
+  if (!workouts[0]) {
+    res.status(404).json({ error: "Treino não encontrado" });
+    return;
+  }
+
+  const [updated] = await db
+    .update(workoutEntriesTable)
+    .set({ shoeId })
+    .where(and(eq(workoutEntriesTable.id, workoutId), eq(workoutEntriesTable.athleteId, athleteId)) as any)
+    .returning();
+
+  res.json({ entry: updated ?? null });
 });
 
 router.get("/procoach/me/weekly-stats", async (_req: Request, res: Response) => {
@@ -635,6 +876,72 @@ router.post("/procoach/me/plan/import-text", async (req: Request, res: Response)
     lastDate: sessions[sessions.length - 1]!.sessionDate,
   });
 });
+
+router.post(
+  "/procoach/me/plan/import-pdf",
+  pdfUpload.single("file"),
+  async (req: Request, res: Response) => {
+    try {
+      await ensurePlanTable();
+      const athleteId = await getOrCreateMonoAthleteId();
+
+      const file = (req as any).file as { buffer: Buffer; originalname?: string; mimetype?: string } | undefined;
+      if (!file?.buffer) {
+        res.status(400).json({ error: "Arquivo PDF é obrigatório (field: file)" });
+        return;
+      }
+
+      const parsed = await pdfParse(file.buffer);
+      const text = String(parsed.text ?? "");
+      const lines = text
+        .split(/\r?\n/g)
+        .map((l) => l.replace(/\u00a0/g, " ").trim())
+        .filter(Boolean);
+
+      // Melhor-esforço: detectar linhas com data e produzir um "import-text" compatível.
+      // Isso permite iterar rápido: PDF -> texto -> mesma rotina de importação.
+      const year = new Date().getFullYear();
+      const importTextLines: string[] = [];
+
+      for (const line of lines) {
+        const mIso = line.match(/^(\d{4}-\d{2}-\d{2})\s+(.*)$/);
+        const mBr = !mIso ? line.match(/^(\d{2}\/\d{2}\/\d{4})\s+(.*)$/) : null;
+        const mDdMm = !mIso && !mBr ? line.match(/^(\d{2}\/\d{2})\s+(.*)$/) : null;
+        if (!mIso && !mBr && !mDdMm) continue;
+
+        let dateKey = "";
+        let rest = "";
+
+        if (mIso) {
+          dateKey = mIso[1]!;
+          rest = mIso[2] ?? "";
+          // converte para DD/MM para reutilizar o import-text
+          const [y, mm, dd] = dateKey.split("-");
+          dateKey = `${dd}/${mm}/${y}`;
+        } else if (mBr) {
+          dateKey = mBr[1]!;
+          rest = mBr[2] ?? "";
+        } else if (mDdMm) {
+          dateKey = `${mDdMm[1]!}/${year}`;
+          rest = mDdMm[2] ?? "";
+        }
+
+        const normalizedRest = rest.replace(/\s{2,}/g, " ").trim();
+        importTextLines.push(`${dateKey} - ${normalizedRest}`);
+      }
+
+      res.json({
+        athleteId,
+        fileName: file.originalname ?? null,
+        detected: importTextLines.length,
+        importText: importTextLines.join("\n"),
+        rawTextPreview: text.slice(0, 2000),
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message ?? "Falha ao processar PDF" });
+    }
+  }
+);
 
 router.post("/procoach/me/plan/import-json", async (req: Request, res: Response) => {
   const body = req.body as any;

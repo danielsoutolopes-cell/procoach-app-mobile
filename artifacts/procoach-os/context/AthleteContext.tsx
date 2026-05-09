@@ -102,7 +102,7 @@ interface AthleteContextType {
   updateProfile: (profile: Partial<AthleteProfile>) => Promise<void>;
   updateHRV: (hrv: number) => Promise<void>;
   updatePainLevel: (level: number) => Promise<void>;
-  markWorkoutComplete: () => Promise<void>;
+  markWorkoutComplete: (opts?: { shoeId?: number | null }) => Promise<void>;
   setCurrentWeek: (week: number) => Promise<void>;
   refreshHistory: () => Promise<void>;
   regenerateWorkout: () => Promise<void>;
@@ -489,7 +489,7 @@ export function AthleteProvider({ children }: { children: React.ReactNode }) {
     [state, save, buildWorkoutWithInjuryCheck, syncToBackend]
   );
 
-  const markWorkoutComplete = useCallback(async () => {
+  const markWorkoutComplete = useCallback(async (opts?: { shoeId?: number | null }) => {
     const roundedKm = formatDistance(state.todayWorkout.distanceKm);
     const todayKey = getSaoPauloDayKey();
     try {
@@ -546,6 +546,7 @@ export function AthleteProvider({ children }: { children: React.ReactNode }) {
         rpe,
         painLevel: state.painLevel,
         injuryAlert: entry.injuryAlert,
+        shoeId: opts?.shoeId ?? null,
       });
     } catch {}
   }, [state, save]);

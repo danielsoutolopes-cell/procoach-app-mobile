@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, gt } from "@workspace/db";
+import { eq, and, gt, sql } from "@workspace/db";
 import { db } from "@workspace/db";
 import {
   authSessionsTable,
@@ -14,6 +14,25 @@ const MONO_DEVICE_ID = "mono";
 
 const CLIENT_ID     = process.env.STRAVA_CLIENT_ID;
 const CLIENT_SECRET = process.env.STRAVA_CLIENT_SECRET;
+
+let workoutShoeColsReady = false;
+async function ensureWorkoutShoeColumns(): Promise<void> {
+  if (workoutShoeColsReady) return;
+  // These columns are added by the procoach routes as well, but Strava sync can run independently.
+  await db.execute(sql`
+    ALTER TABLE IF EXISTS procoach_workout_entries
+      ADD COLUMN IF NOT EXISTS shoe_id INTEGER REFERENCES procoach_shoes(id) ON DELETE SET NULL
+  `);
+  await db.execute(sql`
+    ALTER TABLE IF EXISTS procoach_workout_entries
+      ADD COLUMN IF NOT EXISTS source VARCHAR(16) NOT NULL DEFAULT 'manual'
+  `);
+  await db.execute(sql`
+    ALTER TABLE IF EXISTS procoach_workout_entries
+      ADD COLUMN IF NOT EXISTS external_id BIGINT
+  `);
+  workoutShoeColsReady = true;
+}
 
 function isConfigured(): boolean {
   return Boolean(CLIENT_ID && CLIENT_SECRET);
@@ -113,6 +132,7 @@ async function syncActivitiesForAthlete(
   raceDate: string,
   accessToken: string
 ): Promise<number> {
+  await ensureWorkoutShoeColumns();
   const activitiesRes = await fetch(
     "https://www.strava.com/api/v3/athlete/activities?per_page=60",
     { headers: { Authorization: `Bearer ${accessToken}` } }
@@ -150,6 +170,9 @@ async function syncActivitiesForAthlete(
       athleteId, entryDate: actDateStr, distanceKm: distKm,
       type: procoachType as "corrida" | "bike" | "regenerativo" | "forca" | "folga",
       durationMin: durMin, week: weekNum,
+      shoeId: null,
+      source: "strava",
+      externalId: act.id,
     });
     imported++;
   }
@@ -242,7 +265,17 @@ router.post("/strava/sync-device", async (req: Request, res: Response) => {
   );
 
   await db.update(stravaTokensTable).set({ lastSyncAt: new Date() }).where(eq(stravaTokensTable.athleteId, athlete.id));
-  res.json({ imported, synced: true });
+  const pending = await db.execute(sql`
+    SELECT id, entry_date, distance_km, duration_min
+    FROM procoach_workout_entries
+    WHERE athlete_id = ${athlete.id}
+      AND source = 'strava'
+      AND type = 'corrida'
+      AND shoe_id IS NULL
+    ORDER BY entry_date DESC
+    LIMIT 20
+  `) as { rows: Array<Record<string, unknown>> };
+  res.json({ imported, synced: true, pendingShoe: pending.rows });
 });
 
 router.post("/strava/race-result", async (req: Request, res: Response) => {
@@ -427,7 +460,17 @@ router.post("/strava/sync", async (req: Request, res: Response) => {
   const stored   = await refreshStravaToken(rows[0]);
   const imported = await syncActivitiesForAthlete(athlete.id, athlete.targetRaceDate, stored.accessToken);
   await db.update(stravaTokensTable).set({ lastSyncAt: new Date() }).where(eq(stravaTokensTable.athleteId, athlete.id));
-  res.json({ imported, total: imported });
+  const pending = await db.execute(sql`
+    SELECT id, entry_date, distance_km, duration_min
+    FROM procoach_workout_entries
+    WHERE athlete_id = ${athlete.id}
+      AND source = 'strava'
+      AND type = 'corrida'
+      AND shoe_id IS NULL
+    ORDER BY entry_date DESC
+    LIMIT 20
+  `) as { rows: Array<Record<string, unknown>> };
+  res.json({ imported, total: imported, pendingShoe: pending.rows });
 });
 
 router.post("/strava/disconnect", async (req: Request, res: Response) => {

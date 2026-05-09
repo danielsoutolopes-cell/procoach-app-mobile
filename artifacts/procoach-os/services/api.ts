@@ -63,6 +63,30 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
 }
 
+async function requestFormData<T>(path: string, form: FormData, options: RequestInit = {}): Promise<T> {
+  const baseUrl = await getEffectiveApiUrl();
+  const url = `${baseUrl}/api${path}`;
+
+  try {
+    const res = await fetch(url, {
+      // NÃO setar Content-Type manualmente; o fetch define boundary do multipart.
+      headers: { ...(options.headers ?? {}) },
+      ...options,
+      method: options.method ?? "POST",
+      body: form,
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`API ${options.method ?? "POST"} ${path} → ${res.status}: ${text}`);
+    }
+    return res.json() as Promise<T>;
+  } catch (error) {
+    console.error(`[ALERTA TÁTICO] Falha na comunicação com o Cérebro: ${url}`, error);
+    throw error;
+  }
+}
+
 // -----------------------------------------------------------------------------
 // INTERFACES (ANATOMIA DOS DADOS E REGRAS DE OURO)
 // -----------------------------------------------------------------------------
@@ -88,6 +112,7 @@ export interface WorkoutPayload {
   type: string;
   durationMin: number;
   week: number;
+  shoeId?: number | null;
   // Regra de Ouro: Análise Quali/Quanti e Prevenção de Lesões
   rpe: number;         // Rate of Perceived Exertion (1-10)
   painLevel?: number;  // Radar Articular (1-10)
@@ -110,6 +135,25 @@ export interface StravaDiagnostics {
   connected: boolean;
   redirectUri: string;
   lastSyncAt: string | null;
+}
+
+export interface Shoe {
+  id: number;
+  nickname: string;
+  brand?: string | null;
+  model?: string | null;
+  start_date?: string | null;
+  startDate?: string | null;
+  initial_km?: number | null;
+  initialKm?: number | null;
+  target_km?: number | null;
+  targetKm?: number | null;
+  retired_at?: string | null;
+  retiredAt?: string | null;
+  km_total?: number | null;
+  kmTotal?: number | null;
+  last_used_at?: string | null;
+  lastUsedAt?: string | null;
 }
 
 // -----------------------------------------------------------------------------
@@ -192,6 +236,36 @@ export const ProCoachAPI = {
     return request<{ imported: number; firstDate: string; lastDate: string }>(
       `/procoach/me/plan/import-json`,
       { method: "POST", body: JSON.stringify(payload) }
+    );
+  },
+
+  async getPlan(opts: { from?: string; to?: string } = {}) {
+    const qs = new URLSearchParams();
+
+  async importPlanText(text: string) {
+    return request<{ imported: number; firstDate: string; lastDate: string; year?: number }>(
+      `/procoach/me/plan/import-text`,
+      {
+        method: "POST",
+        body: JSON.stringify({ text }),
+      }
+    );
+  },
+
+  async importPlanPdf(asset: { uri: string; name: string; mimeType?: string | null }) {
+    const form = new FormData();
+    form.append(
+      "file",
+      {
+        uri: asset.uri,
+        name: asset.name,
+        type: asset.mimeType ?? "application/pdf",
+      } as any
+    );
+    return requestFormData<{ detected: number; importText: string; rawTextPreview: string; fileName: string | null }>(
+      `/procoach/me/plan/import-pdf`,
+      form,
+      { method: "POST" }
     );
   },
 
@@ -314,7 +388,7 @@ export const ProCoachAPI = {
   },
 
   async stravaSync() {
-    return request<{ imported: number; synced: boolean }>("/strava/sync-device", {
+    return request<{ imported: number; synced: boolean; pendingShoe?: any[] }>("/strava/sync-device", {
       method: "POST",
       body: JSON.stringify({}),
     });
@@ -336,6 +410,60 @@ export const ProCoachAPI = {
 
   async stravaDiagnostics() {
     return request<StravaDiagnostics>(`/strava/diagnostics`);
+  },
+
+  // --- EQUIPAMENTOS (TÊNIS) ---
+  async getShoes() {
+    return request<{ shoes: Shoe[] }>(`/procoach/me/shoes`);
+  },
+
+  async createShoe(payload: {
+    nickname: string;
+    brand?: string | null;
+    model?: string | null;
+    startDate?: string | null;
+    initialKm?: number | null;
+    targetKm?: number | null;
+  }) {
+    return request<{ shoe: Shoe }>(`/procoach/me/shoes`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async updateShoe(
+    id: number,
+    payload: Partial<{
+      nickname: string;
+      brand: string | null;
+      model: string | null;
+      startDate: string | null;
+      initialKm: number | null;
+      targetKm: number | null;
+    }>
+  ) {
+    return request<{ shoe: Shoe }>(`/procoach/me/shoes/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async archiveShoe(id: number) {
+    return request<{ shoe: Shoe }>(`/procoach/me/shoes/${id}/archive`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  },
+
+  async getPendingShoe(limit = 20) {
+    return request<{ pending: any[] }>(`/procoach/me/workouts/pending-shoe?limit=${limit}`);
+  },
+
+  async setWorkoutShoe(workoutId: number, shoeId: number) {
+    return request<{ entry: any }>(`/procoach/me/workouts/${workoutId}/set-shoe`, {
+      method: "POST",
+      body: JSON.stringify({ shoeId }),
+    });
   },
 
   // --- NOTIFICAÇÕES TÁTICAS ---

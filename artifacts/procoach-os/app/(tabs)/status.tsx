@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -14,6 +15,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as DocumentPicker from "expo-document-picker";
 
 import { useAthlete } from "@/context/AthleteContext";
 import { useColors } from "@/hooks/useColors";
@@ -143,6 +145,12 @@ export default function CheckInScreen() {
     paceTarget: string | null;
     structure: string | null;
   }>>([]);
+
+  const [planPdfImporting, setPlanPdfImporting] = useState(false);
+  const [planPdfPreviewOpen, setPlanPdfPreviewOpen] = useState(false);
+  const [planPdfImportText, setPlanPdfImportText] = useState("");
+  const [planPdfDetected, setPlanPdfDetected] = useState(0);
+  const [planPdfPreview, setPlanPdfPreview] = useState("");
 
   const [complianceLoading, setComplianceLoading] = useState(false);
   const [compliance, setCompliance] = useState<null | {
@@ -382,6 +390,56 @@ export default function CheckInScreen() {
     }
   };
 
+  const handleImportPlanPdf = async () => {
+    setPlanPdfImporting(true);
+    try {
+      const pick = await DocumentPicker.getDocumentAsync({
+        type: "application/pdf",
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+      if (pick.canceled) return;
+      const asset = pick.assets?.[0];
+      if (!asset?.uri || !asset?.name) {
+        Alert.alert("PDF inválido", "Não consegui ler o arquivo selecionado.");
+        return;
+      }
+
+      const r = await ProCoachAPI.importPlanPdf({
+        uri: asset.uri,
+        name: asset.name,
+        mimeType: asset.mimeType ?? "application/pdf",
+      });
+      setPlanPdfDetected(r.detected ?? 0);
+      setPlanPdfImportText(String(r.importText ?? ""));
+      setPlanPdfPreview(String(r.rawTextPreview ?? ""));
+      setPlanPdfPreviewOpen(true);
+    } catch (e: any) {
+      Alert.alert("Erro ao importar PDF", String(e?.message ?? e ?? "Falha desconhecida"));
+    } finally {
+      setPlanPdfImporting(false);
+    }
+  };
+
+  const handleCommitPlanPdf = async () => {
+    const text = planPdfImportText.trim();
+    if (!text) {
+      Alert.alert("Nada detectado", "Não detectei nenhuma linha com data no PDF. Envie um PDF de exemplo para ajustarmos o parser.");
+      return;
+    }
+    setPlanImporting(true);
+    try {
+      const r = await ProCoachAPI.importPlanText(text);
+      setPlanImportResult(`Importado: ${r.imported} treinos (${r.firstDate} → ${r.lastDate})`);
+      setPlanPdfPreviewOpen(false);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (e: any) {
+      Alert.alert("Erro ao importar", String(e?.message ?? e ?? "Falha desconhecida"));
+    } finally {
+      setPlanImporting(false);
+    }
+  };
+
   const handleCheckPlan = async () => {
     setPlanChecking(true);
     try {
@@ -596,6 +654,55 @@ export default function CheckInScreen() {
 
   return (
     <View style={s.container}>
+      <Modal
+        visible={planPdfPreviewOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setPlanPdfPreviewOpen(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.65)", padding: 18, justifyContent: "flex-end" }}>
+          <View style={{ backgroundColor: colors.card, borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 16 }}>
+            <Text style={[s.cardTitle, { color: colors.primary }]}>IMPORTAR PLANO (PDF)</Text>
+            <Text style={{ marginTop: 8, fontSize: 11, color: colors.mutedForeground, lineHeight: 16 }}>
+              Detectei {planPdfDetected} linha(s) com data. Você pode ajustar o texto abaixo antes de importar.
+            </Text>
+
+            <Text style={[s.profileLabel, { marginTop: 12 }]}>TEXTO DETECTADO (EDITÁVEL)</Text>
+            <TextInput
+              style={[s.inputField, s.planTextArea, { fontSize: 12, height: 160 }]}
+              value={planPdfImportText}
+              onChangeText={setPlanPdfImportText}
+              multiline
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+
+            <Text style={[s.profileLabel, { marginTop: 12 }]}>PRÉVIA DO PDF (RAW)</Text>
+            <Text style={{ fontSize: 10, color: colors.mutedForeground, lineHeight: 15 }}>
+              {planPdfPreview || "(sem prévia)"}
+            </Text>
+
+            <View style={{ flexDirection: "row", gap: 10, marginTop: 14 }}>
+              <Pressable
+                onPress={() => setPlanPdfPreviewOpen(false)}
+                style={({ pressed }) => [
+                  { flex: 1, paddingVertical: 12, borderRadius: 10, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border, opacity: pressed ? 0.8 : 1 },
+                ]}
+              >
+                <Text style={{ fontSize: 11, fontWeight: "800" as const, letterSpacing: 2, color: colors.mutedForeground }}>CANCELAR</Text>
+              </Pressable>
+              <Pressable
+                onPress={handleCommitPlanPdf}
+                style={({ pressed }) => [
+                  { flex: 1, paddingVertical: 12, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: colors.primary, opacity: pressed ? 0.8 : 1 },
+                ]}
+              >
+                <Text style={{ fontSize: 11, fontWeight: "900" as const, letterSpacing: 2, color: "#000" }}>IMPORTAR</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
       <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
 
         <Text style={s.greeting}>{getGreeting()}</Text>
@@ -1169,6 +1276,25 @@ export default function CheckInScreen() {
               <Feather name="upload" size={14} color="#000000" />
             )}
             <Text style={s.importBtnText}>IMPORTAR PARA O NEON</Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [
+              s.checkBtn,
+              {
+                opacity: pressed ? 0.7 : 1,
+                marginTop: 10,
+                backgroundColor: planPdfImporting ? colors.border : colors.secondary,
+              },
+            ]}
+            onPress={handleImportPlanPdf}
+            disabled={planPdfImporting}
+          >
+            {planPdfImporting ? (
+              <ActivityIndicator size="small" color={colors.mutedForeground} />
+            ) : (
+              <Feather name="file-text" size={14} color={colors.mutedForeground} />
+            )}
+            <Text style={s.checkBtnText}>IMPORTAR VIA PDF (TABELA)</Text>
           </Pressable>
           {!!planImportResult && (
             <Text style={{ marginTop: 10, fontSize: 11, color: "#4CAF50", lineHeight: 16 }}>

@@ -153,6 +153,24 @@ Passo a passo:
 O que você deve ver (esperado):
 - Mensagem verde confirmando o total importado.
 
+6.1.1 Importar Plano (PDF com tabela)
+Use isso quando você tem a planilha de treino em PDF (com tabela).
+
+Passo a passo:
+1. Vá na aba “Status”.
+2. Role até “IMPORTAR PLANO (JSON)”.
+3. Toque em “IMPORTAR VIA PDF (TABELA)”.
+4. Selecione o PDF.
+5. O app vai mostrar um PREVIEW com o texto detectado (editável).
+6. Toque em “IMPORTAR”.
+
+O que você deve ver (esperado):
+- “Detectei X linha(s) com data” e um campo com o texto editável.
+- Depois, a mesma mensagem verde de sucesso do import (Importado: X treinos…).
+
+Dica:
+- Se “Detectei 0 linhas”, envie um PDF de exemplo (o parser depende do formato da tabela).
+
 
 6.2 Verificar plano importado (lista de checagem)
 Passo a passo:
@@ -222,6 +240,18 @@ Se aparecer erro de redirect:
 
 O que você deve ver (esperado):
 - Mensagem de sucesso e/ou “importado X”.
+
+7.3 Tênis obrigatório em corridas (pós-Strava e check-in)
+Regra:
+- Corridas: o app exige escolher um tênis ao concluir/importar treino.
+- Bike/força: fica “Sem tênis” automaticamente.
+
+Quando acontece:
+1) Ao concluir uma corrida manualmente (“TREINO DO DIA”).
+2) Ao sincronizar o Strava, se chegar corrida nova sem tênis.
+
+Se o app pedir e você não tiver tênis:
+- Vá na aba “TÊNIS” e cadastre pelo menos 1 tênis ativo.
 
 
 8) SPOTIFY — PLAYLIST DO TREINO
@@ -315,3 +345,25 @@ Checklist:
 
 - Não compartilhe tokens, client secret, URLs de banco ou credenciais em mensagens.
 - Se você já compartilhou algum segredo, trate como comprometido e faça rotação.
+
+
+14) PARA DESENVOLVIMENTO — “IGUALAR” COMPUTADOR COM O GITHUB (PROMPT/ROTINA)
+
+Objetivo:
+- Garantir que o código na sua IDE esteja sincronizado com o repositório do GitHub (sem divergência).
+
+Rotina recomendada (sempre antes de mexer no projeto):
+1) Abra o terminal na pasta do projeto
+2) Rode:
+   - `git status`
+   - `git fetch --all --prune`
+   - `git pull --rebase`
+3) Se houver conflitos:
+   - resolva, rode `git status` até ficar limpo
+   - finalize com `git add .` + `git rebase --continue`
+4) Antes de subir mudanças:
+   - `git status` (confirme arquivos corretos)
+   - `git push`
+
+Prompt pronto para usar na IDE (copie e cole):
+“Verifique meu repositório local e deixe ele IGUAL ao GitHub. Passos: rode git status, depois git fetch --all --prune, depois git pull --rebase. Se houver conflitos, me guie para resolver. No final, confirme que não há alterações pendentes e que o branch local está alinhado ao remoto.”

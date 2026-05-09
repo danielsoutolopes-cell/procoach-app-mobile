@@ -31,6 +31,10 @@ function NativeTabLayout() {
         <Icon sf={{ default: "chart.bar.fill", selected: "chart.bar.fill" }} />
         <Label>Histórico</Label>
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="equipamentos">
+        <Icon sf={{ default: "shoeprints", selected: "shoeprints.fill" }} />
+        <Label>Tênis</Label>
+      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="status">
         <Icon sf={{ default: "checkmark.circle", selected: "checkmark.circle.fill" }} />
         <Label>Check-in</Label>
@@ -119,6 +123,15 @@ function ClassicTabLayout() {
           title: "HISTÓRICO",
           tabBarIcon: ({ color }) => (
             <Feather name="bar-chart-2" size={20} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="equipamentos"
+        options={{
+          title: "TÊNIS",
+          tabBarIcon: ({ color }) => (
+            <Feather name="shopping-bag" size={20} color={color} />
           ),
         }}
       />

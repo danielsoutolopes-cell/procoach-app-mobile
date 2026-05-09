@@ -1,4 +1,5 @@
 import {
+  bigint,
   integer,
   pgEnum,
   pgTable,
@@ -34,6 +35,22 @@ export const athletesTable = pgTable("procoach_athletes", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+export const shoesTable = pgTable("procoach_shoes", {
+  id: serial("id").primaryKey(),
+  athleteId: integer("athlete_id")
+    .notNull()
+    .references(() => athletesTable.id, { onDelete: "cascade" }),
+  nickname: varchar("nickname", { length: 120 }).notNull(),
+  brand: varchar("brand", { length: 80 }),
+  model: varchar("model", { length: 120 }),
+  startDate: varchar("start_date", { length: 32 }),
+  initialKm: integer("initial_km").notNull().default(0),
+  targetKm: integer("target_km").notNull().default(500),
+  retiredAt: timestamp("retired_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 export const workoutEntriesTable = pgTable("procoach_workout_entries", {
   id: serial("id").primaryKey(),
   athleteId: integer("athlete_id")
@@ -44,6 +61,9 @@ export const workoutEntriesTable = pgTable("procoach_workout_entries", {
   type: workoutTypeEnum("type").notNull(),
   durationMin: integer("duration_min").notNull().default(0),
   week: integer("week").notNull(),
+  shoeId: integer("shoe_id").references(() => shoesTable.id, { onDelete: "set null" }),
+  source: varchar("source", { length: 16 }).notNull().default("manual"),
+  externalId: bigint("external_id", { mode: "number" }),
   injuryAlert: varchar("injury_alert", { length: 100 }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
@@ -87,3 +107,6 @@ export type InsertWorkoutEntry = Omit<
 >;
 
 export type WeeklyStat = typeof weeklyStatsTable.$inferSelect;
+
+export type Shoe = typeof shoesTable.$inferSelect;
+export type InsertShoe = typeof shoesTable.$inferInsert;

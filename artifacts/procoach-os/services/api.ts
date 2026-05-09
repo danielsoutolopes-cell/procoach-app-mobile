@@ -1,6 +1,7 @@
 import { Race } from "./schema";
 // api.ts
 import Constants from "expo-constants";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // -----------------------------------------------------------------------------
 // MOTOR DE COMUNICAÇÃO PROCOACH OS V5.1
@@ -9,16 +10,41 @@ import Constants from "expo-constants";
 
 // Prioriza a URL fornecida via variável de ambiente (ex: .env)
 // No Expo, use EXPO_PUBLIC_API_URL para o ambiente de produção
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "https://procoach-os-api.onrender.com";
+const DEFAULT_API_URL = process.env.EXPO_PUBLIC_API_URL ?? "https://procoach-os-api.onrender.com";
+const API_URL_OVERRIDE_KEY = "@procoach_api_url_override";
 
 if (!process.env.EXPO_PUBLIC_API_URL) {
   console.warn("[ALERTA TÁTICO] EXPO_PUBLIC_API_URL não definida. As requisições podem falhar ou usar o endereço incorreto.");
 }
 
-const BASE = `${API_URL}/api`;
+let apiUrlOverrideCache: string | null | undefined = undefined;
+
+function normalizeApiUrl(url: string): string {
+  return url.trim().replace(/\/+$/, "");
+}
+
+export async function getEffectiveApiUrl(): Promise<string> {
+  if (apiUrlOverrideCache === undefined) {
+    apiUrlOverrideCache = (await AsyncStorage.getItem(API_URL_OVERRIDE_KEY).catch(() => null)) ?? null;
+  }
+  const v = apiUrlOverrideCache ? normalizeApiUrl(apiUrlOverrideCache) : normalizeApiUrl(DEFAULT_API_URL);
+  return v;
+}
+
+export async function setApiUrlOverride(next: string | null): Promise<string> {
+  const normalized = next && next.trim() ? normalizeApiUrl(next) : null;
+  apiUrlOverrideCache = normalized;
+  if (normalized) {
+    await AsyncStorage.setItem(API_URL_OVERRIDE_KEY, normalized);
+  } else {
+    await AsyncStorage.removeItem(API_URL_OVERRIDE_KEY);
+  }
+  return getEffectiveApiUrl();
+}
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const url = `${BASE}${path}`;
+  const baseUrl = await getEffectiveApiUrl();
+  const url = `${baseUrl}/api${path}`;
   
   try {
     const res = await fetch(url, {

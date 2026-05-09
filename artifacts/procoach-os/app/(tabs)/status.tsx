@@ -17,7 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAthlete } from "@/context/AthleteContext";
 import { useColors } from "@/hooks/useColors";
-import { ProCoachAPI } from "@/services/api";
+import { ProCoachAPI, getEffectiveApiUrl, setApiUrlOverride } from "@/services/api";
 import { getRecoverySuggestion, shouldSuggestRecovery } from "@/utils/training";
 import {
   WeeklyReportPrefs,
@@ -129,6 +129,11 @@ export default function CheckInScreen() {
     redirectUri: string;
     lastSyncAt: string | null;
   }>(null);
+  const [stravaDiagError, setStravaDiagError] = useState<string>("");
+
+  const [apiUrlCurrent, setApiUrlCurrent] = useState<string>("");
+  const [apiUrlInput, setApiUrlInput] = useState<string>("");
+  const [apiUrlSaving, setApiUrlSaving] = useState(false);
 
   // ── Notification state ─────────────────────────────────────────────────────
   const supported = notificationsSupported();
@@ -176,8 +181,10 @@ export default function CheckInScreen() {
     try {
       const r = await ProCoachAPI.stravaDiagnostics();
       setStravaDiag(r);
+      setStravaDiagError("");
     } catch {
       setStravaDiag(null);
+      setStravaDiagError("Falha ao consultar. Verifique o servidor (API URL).");
     } finally {
       setStravaDiagLoading(false);
     }
@@ -185,6 +192,41 @@ export default function CheckInScreen() {
 
   useEffect(() => {
     refreshStravaDiag();
+  }, [refreshStravaDiag]);
+
+  useEffect(() => {
+    getEffectiveApiUrl().then((u) => {
+      setApiUrlCurrent(u);
+      setApiUrlInput(u);
+    });
+  }, []);
+
+  const handleSaveApiUrl = useCallback(async () => {
+    setApiUrlSaving(true);
+    try {
+      const next = await setApiUrlOverride(apiUrlInput);
+      setApiUrlCurrent(next);
+      setApiUrlInput(next);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      refreshStravaDiag();
+    } catch {
+    } finally {
+      setApiUrlSaving(false);
+    }
+  }, [apiUrlInput, refreshStravaDiag]);
+
+  const handleClearApiUrl = useCallback(async () => {
+    setApiUrlSaving(true);
+    try {
+      const next = await setApiUrlOverride(null);
+      setApiUrlCurrent(next);
+      setApiUrlInput(next);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      refreshStravaDiag();
+    } catch {
+    } finally {
+      setApiUrlSaving(false);
+    }
   }, [refreshStravaDiag]);
 
   const refreshBio = useCallback(async () => {
@@ -829,6 +871,46 @@ export default function CheckInScreen() {
         </View>
 
         <View style={s.card}>
+          <Text style={s.cardTitle}>SERVIDOR (API URL)</Text>
+          <View style={s.divider} />
+          <Text style={{ fontSize: 11, color: colors.mutedForeground, lineHeight: 16 }}>
+            Atual: {apiUrlCurrent || "—"}
+          </Text>
+          <View style={{ height: 10 }} />
+          <TextInput
+            style={[s.inputField, { fontSize: 12 }]}
+            value={apiUrlInput}
+            onChangeText={setApiUrlInput}
+            placeholderTextColor={colors.mutedForeground}
+            placeholder="https://SEU-SERVICO.onrender.com"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <View style={{ flexDirection: "row", marginTop: 10 }}>
+            <Pressable
+              style={({ pressed }) => [
+                s.saveBtn,
+                { opacity: pressed ? 0.7 : 1, backgroundColor: apiUrlSaving ? colors.border : colors.primary },
+              ]}
+              onPress={handleSaveApiUrl}
+              disabled={apiUrlSaving}
+            >
+              <Text style={s.saveBtnText}>SALVAR</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [
+                s.saveBtn,
+                { opacity: pressed ? 0.7 : 1, backgroundColor: colors.card, marginLeft: 10 },
+              ]}
+              onPress={handleClearApiUrl}
+              disabled={apiUrlSaving}
+            >
+              <Text style={[s.saveBtnText, { color: colors.foreground }]}>LIMPAR</Text>
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={s.card}>
           <View style={s.cardTitleRow}>
             <Text style={s.cardTitle}>STRAVA (DIAGNÓSTICO)</Text>
             <Pressable onPress={refreshStravaDiag} disabled={stravaDiagLoading}>
@@ -853,9 +935,14 @@ export default function CheckInScreen() {
               </Text>
             </>
           ) : (
-            <Text style={{ fontSize: 12, color: colors.mutedForeground, lineHeight: 16 }}>
-              Não foi possível consultar o diagnóstico do Strava agora.
-            </Text>
+            <>
+              <Text style={{ fontSize: 12, color: colors.mutedForeground, lineHeight: 16 }}>
+                {stravaDiagError || "Não foi possível consultar o diagnóstico do Strava agora."}
+              </Text>
+              <Text style={{ fontSize: 10, color: colors.mutedForeground, marginTop: 8, lineHeight: 15 }}>
+                Servidor: {apiUrlCurrent || "—"}
+              </Text>
+            </>
           )}
         </View>
 

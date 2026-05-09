@@ -5,7 +5,7 @@
   "build": {
     "preview": {
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://procoach-os-api.onrender.com"
+        "EXPO_PUBLIC_API_URL": "https://coach-pro-v8e4.onrender.com"
       },
       "android": {
         "buildType": "apk"

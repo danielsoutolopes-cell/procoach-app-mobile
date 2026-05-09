@@ -10,7 +10,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // Prioriza a URL fornecida via variável de ambiente (ex: .env)
 // No Expo, use EXPO_PUBLIC_API_URL para o ambiente de produção
-const DEFAULT_API_URL = process.env.EXPO_PUBLIC_API_URL ?? "https://procoach-os-api.onrender.com";
+const DEFAULT_API_URL = process.env.EXPO_PUBLIC_API_URL ?? "https://coach-pro-v8e4.onrender.com";
 const API_URL_OVERRIDE_KEY = "@procoach_api_url_override";
 
 if (!process.env.EXPO_PUBLIC_API_URL) {

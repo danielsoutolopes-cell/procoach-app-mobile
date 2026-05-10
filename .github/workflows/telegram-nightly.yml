@@ -1,0 +1,19 @@
+name: Telegram Nightly Briefing
+
+on:
+  schedule:
+    - cron: "0 1 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call ProCoach nightly endpoint
+        env:
+          CRON_SECRET: ${{ secrets.TELEGRAM_CRON_SECRET }}
+        run: |
+          curl -sS -X POST "https://coach-pro-v8e4.onrender.com/api/telegram/nightly" \
+            -H "x-cron-secret: ${CRON_SECRET}" \
+            -H "content-type: application/json" \
+            --data "{}"

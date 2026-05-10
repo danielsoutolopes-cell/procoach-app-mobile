@@ -98,7 +98,12 @@ export default function HistoricoScreen() {
 
   const filteredHistory = useMemo(() => {
     // Convertemos para unknown primeiro para evitar o erro de overlap insuficiente entre o payload e o record do banco
-    return (history as unknown as WorkoutEntry[]).filter(e => !selectedWeekFilter || e.week === selectedWeekFilter);
+    return (history as unknown as WorkoutEntry[]).filter(
+      (e) =>
+        (!selectedWeekFilter || e.week === selectedWeekFilter) &&
+        e.type === "corrida" &&
+        Number(e.distanceKm ?? 0) >= 3
+    );
   }, [history, selectedWeekFilter]);
 
   const distributionData = useMemo(() => {

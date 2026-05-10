@@ -32,7 +32,7 @@ function NativeTabLayout() {
         <Label>Histórico</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="equipamentos">
-        <Icon sf={{ default: "shoeprints", selected: "shoeprints.fill" }} />
+        <Icon sf={{ default: "figure.run", selected: "figure.run" }} />
         <Label>Tênis</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="status">

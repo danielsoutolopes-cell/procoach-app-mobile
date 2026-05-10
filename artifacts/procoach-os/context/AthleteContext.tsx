@@ -73,6 +73,7 @@ export interface Race {
   address?: string;
   raceStartTime?: string;    // "07:00" format
   targetPaceMinKm?: number;  // e.g. 6.5 = 6min30s/km
+  archived?: boolean;
 }
 
 export interface AthleteProfile {
@@ -81,6 +82,7 @@ export interface AthleteProfile {
   targetRaceDate: string;
   targetRaceDistanceKm: number;
   races: Race[];
+  macrocycleRaceId?: string | null;
 }
 
 export interface AthleteState {
@@ -149,6 +151,17 @@ function getSaoPauloDayKey(d: Date = new Date()): string {
 
 function deriveTargetFromNextP1(profile: AthleteProfile): AthleteProfile {
   const races = profile.races ?? [];
+  const anchorId = profile.macrocycleRaceId;
+  const anchor = anchorId ? races.find((r) => r.id === anchorId) : undefined;
+  if (anchor) {
+    return {
+      ...profile,
+      targetRaceName: anchor.name,
+      targetRaceDate: anchor.date,
+      targetRaceDistanceKm: anchor.distanceKm,
+    };
+  }
+
   const p1s = races.filter((r) => r.priority === "P1");
   if (p1s.length === 0) return profile;
   const todayKey = getSaoPauloDayKey();
@@ -278,6 +291,7 @@ export function AthleteProvider({ children }: { children: React.ReactNode }) {
                 raceStartTime: "05:30",
               },
             ],
+            macrocycleRaceId: "p1-nike-sp-city-marathon-21k-2026",
           },
         };
       }
@@ -310,7 +324,7 @@ export function AthleteProvider({ children }: { children: React.ReactNode }) {
         const merged: Record<number, number> = { ...localState.weeklyCompleted };
         for (const [week, km] of Object.entries(remoteWeeklyCompleted)) {
           const w = Number(week);
-          merged[w] = Math.max(merged[w] ?? 0, km);
+          merged[w] = Number(km) || 0;
         }
 
         const needsNewWorkout = !hasCachedWorkout;
@@ -519,13 +533,14 @@ export function AthleteProvider({ children }: { children: React.ReactNode }) {
     };
 
     const prevKm = state.weeklyCompleted[state.currentWeek] ?? 0;
+    const adherenceKm = entry.type === "corrida" && roundedKm >= 3 ? roundedKm : 0;
     const next: AthleteState = {
       ...state,
       todayWorkout: { ...state.todayWorkout, completed: true },
       history: [entry, ...state.history],
       weeklyCompleted: {
         ...state.weeklyCompleted,
-        [state.currentWeek]: prevKm + roundedKm,
+        [state.currentWeek]: prevKm + adherenceKm,
       },
     };
     await save(next);
@@ -584,7 +599,7 @@ export function AthleteProvider({ children }: { children: React.ReactNode }) {
       setState((prev) => {
         const merged: Record<number, number> = { ...prev.weeklyCompleted };
         for (const [w, km] of Object.entries(remoteWeekly)) {
-          merged[Number(w)] = Math.max(merged[Number(w)] ?? 0, km as number);
+          merged[Number(w)] = Number(km) || 0;
         }
         const next = { ...prev, history: entries, weeklyCompleted: merged };
         AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));

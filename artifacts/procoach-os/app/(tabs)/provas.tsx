@@ -9,6 +9,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -31,6 +32,7 @@ import { generateWeeklyReport } from "@/utils/weeklyReport";
 import {
   RACE_ROLE,
   validateRacePlacement,
+  getRaceWeekInCycle,
   calcEstimatedTimeMin,
   calcGelCount,
   getGelSchedule,
@@ -644,8 +646,10 @@ export default function ProvasScreen() {
   const [draftAddress, setDraftAddress] = useState("");
   const [draftStartHour, setDraftStartHour] = useState(7);
   const [draftPaceMinKm, setDraftPaceMinKm] = useState(6.0);
+  const [draftIsAnchor, setDraftIsAnchor] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [validationResult, setValidationResult] = useState<{ ok: boolean; warning: boolean; message: string } | null>(null);
+  const [raceFilter, setRaceFilter] = useState<"TODAS" | RacePriority | "PASSADAS">("TODAS");
 
   const races: Race[] = useMemo(() => {
     const stored = profile.races ?? [];
@@ -661,28 +665,38 @@ export default function ProvasScreen() {
     return stored;
   }, [profile]);
 
+  const activeRaces = useMemo(() => races.filter((r) => !r.archived), [races]);
+
   const futureRaces = useMemo(() => {
-    return [...races]
+    return [...activeRaces]
       .filter((r) => getDaysUntilRace(r.date) >= 0)
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  }, [races]);
+  }, [activeRaces]);
 
-  const nextRace = futureRaces[0] ?? [...races].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
+  const nextRace = futureRaces[0] ?? [...activeRaces].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
 
-  const p1Race = useMemo(() => {
+  const nextP1Race = useMemo(() => {
     const nextP1 = futureRaces.find((r) => r.priority === "P1");
     if (nextP1) return nextP1;
-    const anyP1 = races.find((r) => r.priority === "P1");
-    return anyP1 ?? races[0];
-  }, [futureRaces, races]);
+    const anyP1 = activeRaces.find((r) => r.priority === "P1");
+    return anyP1 ?? activeRaces[0];
+  }, [futureRaces, activeRaces]);
+
+  const macrocycleRace = useMemo(() => {
+    const id = (profile as any).macrocycleRaceId as string | null | undefined;
+    if (!id) return null;
+    return activeRaces.find((r) => r.id === id) ?? null;
+  }, [profile, activeRaces]);
+
+  const anchorRace = macrocycleRace ?? nextP1Race ?? nextRace ?? null;
 
   // Races within 2 days → show logistics
   const upcomingRaces = useMemo(
-    () => races.filter((r) => {
+    () => activeRaces.filter((r) => {
       const d = getDaysUntilRace(r.date);
       return d >= 0 && d <= 2;
     }),
-    [races]
+    [activeRaces]
   );
 
   const openNew = useCallback(() => {
@@ -694,6 +708,7 @@ export default function ProvasScreen() {
     setDraftAddress("");
     setDraftStartHour(7);
     setDraftPaceMinKm(6.0);
+    setDraftIsAnchor(false);
     setValidationResult(null);
     setEditing(true);
   }, []);
@@ -707,9 +722,10 @@ export default function ProvasScreen() {
     setDraftAddress(race.address ?? "");
     setDraftStartHour(parseInt((race.raceStartTime ?? "07:00").split(":")[0] ?? "7", 10));
     setDraftPaceMinKm(race.targetPaceMinKm ?? 6.0);
+    setDraftIsAnchor((profile as any).macrocycleRaceId === race.id);
     setValidationResult(null);
     setEditing(true);
-  }, []);
+  }, [profile]);
 
   const cancelEdit = useCallback(() => {
     setEditing(false);
@@ -738,26 +754,33 @@ export default function ProvasScreen() {
       address: draftAddress.trim() || undefined,
       raceStartTime,
       targetPaceMinKm: draftPaceMinKm,
+      archived: false,
     };
 
     let newRaces: Race[];
+    let savedRaceId: string;
     if (editingId) {
-      newRaces = races.map((r) => r.id === editingId ? { ...r, ...raceData } : r);
+      savedRaceId = editingId;
+      newRaces = races.map((r) => (r.id === editingId ? { ...r, ...raceData } : r));
     } else {
-      const newRace: Race = { id: genId(), ...raceData };
-      const hasPriority = races.some((r) => r.priority === draftPriority);
-      newRaces = hasPriority
-        ? races.map((r) => r.priority === draftPriority ? { ...r, ...raceData } : r)
-        : [...races, newRace];
+      savedRaceId = genId();
+      const newRace: Race = { id: savedRaceId, ...raceData };
+      newRaces = [...races, newRace];
     }
 
-    newRaces.sort((a, b) => a.priority.localeCompare(b.priority));
-    const newP1 = newRaces.find((r) => r.priority === "P1") ?? newRaces[0];
+    newRaces.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-    // Validate cycle placement
-    const p1Target = newP1.date;
+    const nextMacroId = draftIsAnchor ? savedRaceId : ((profile as any).macrocycleRaceId as string | null | undefined);
+    const macroRaceNext =
+      (nextMacroId ? newRaces.find((r) => r.id === nextMacroId) : undefined) ??
+      newRaces.filter((r) => !r.archived && r.priority === "P1").sort((a, b) => a.date.localeCompare(b.date))[0] ??
+      newRaces.filter((r) => !r.archived)[0];
+
+    const macroDateISO = macroRaceNext?.date ?? isoDate;
+
     for (const r of newRaces) {
-      const val = validateRacePlacement(r, p1Target);
+      if (r.archived) continue;
+      const val = validateRacePlacement(r, macroDateISO);
       if (!val.ok && r.id === (editingId ?? newRaces[newRaces.length - 1]?.id)) {
         setValidationResult(val);
       }
@@ -765,20 +788,8 @@ export default function ProvasScreen() {
 
     await updateProfile({
       races: newRaces,
-      targetRaceName: newP1.name,
-      targetRaceDate: newP1.date,
-      targetRaceDistanceKm: newP1.distanceKm,
+      ...(draftIsAnchor ? { macrocycleRaceId: savedRaceId } : {}),
     });
-
-    // Auto-calculate current week from P1 race date
-    if (draftPriority === "P1" || newRaces.length === 1) {
-      const today = new Date();
-      const raceDate = new Date(newP1.date);
-      const daysRemaining = Math.ceil((raceDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-      const weeksRemaining = Math.ceil(daysRemaining / 7);
-      const calculatedWeek = Math.max(1, Math.min(16, 17 - weeksRemaining));
-      await setCurrentWeek(calculatedWeek);
-    }
 
     // Schedule pre-race notification
     if (notificationsSupported()) {
@@ -801,23 +812,19 @@ export default function ProvasScreen() {
 
     setEditing(false);
     setEditingId(null);
-  }, [draftName, draftDateStr, draftDistance, draftPriority, draftAddress, draftStartHour, draftPaceMinKm, editingId, races, updateProfile, setCurrentWeek, profile.name]);
+  }, [draftName, draftDateStr, draftDistance, draftPriority, draftAddress, draftStartHour, draftPaceMinKm, draftIsAnchor, editingId, races, updateProfile, profile]);
 
   const handleDelete = useCallback(async (id: string) => {
     await cancelPreRaceReminder(id);
-    const filtered = races.filter((r) => r.id !== id);
-    if (filtered.length === 0) return;
-    filtered.sort((a, b) => a.priority.localeCompare(b.priority));
-    const newP1 = filtered.find((r) => r.priority === "P1") ?? filtered[0];
+    const nextRaces = races.map((r) => (r.id === id ? { ...r, archived: true } : r));
+    const isAnchor = ((profile as any).macrocycleRaceId as string | null | undefined) === id;
     await updateProfile({
-      races: filtered,
-      targetRaceName: newP1.name,
-      targetRaceDate: newP1.date,
-      targetRaceDistanceKm: newP1.distanceKm,
+      races: nextRaces,
+      ...(isAnchor ? { macrocycleRaceId: null } : {}),
     });
     setEditing(false);
     setValidationResult(null);
-  }, [races, updateProfile]);
+  }, [races, updateProfile, profile]);
 
   const handleGenerateWeeklyPDF = useCallback(async () => {
     setPdfLoading(true);
@@ -838,7 +845,7 @@ export default function ProvasScreen() {
       const adjTime = adjPace ? calcEstimatedTimeMin(race.distanceKm, adjPace) : undefined;
       const html = generateLogisticsReport({
         race, travelMin, athleteName: profile.name,
-        p1DateISO: p1Race?.date ?? race.date,
+        p1DateISO: anchorRace?.date ?? race.date,
         weatherHtml: wHtml,
         adjustedPaceMinKm: adjPace,
         adjustedEstimatedMin: adjTime,
@@ -847,12 +854,23 @@ export default function ProvasScreen() {
     } catch {
       Alert.alert("Erro ao gerar PDF", "Tente novamente em instantes.");
     }
-  }, [profile.name, p1Race]);
+  }, [profile.name, anchorRace]);
 
-  const daysUntil = getDaysUntilRace(p1Race?.date ?? profile.targetRaceDate);
+  const daysUntil = getDaysUntilRace(anchorRace?.date ?? profile.targetRaceDate);
   const weeksUntilRace = Math.ceil(daysUntil / 7);
   const weeksArray = Array.from({ length: 16 }, (_, i) => i + 1);
-  const secondaryRaces = races.filter((r) => r.priority !== "P1");
+  const anchorId = (profile as any).macrocycleRaceId as string | null | undefined;
+
+  const racesForList = useMemo(() => {
+    const sorted = [...races].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    if (raceFilter === "PASSADAS") {
+      return sorted.filter((r) => !r.archived && getDaysUntilRace(r.date) < 0);
+    }
+    if (raceFilter === "TODAS") {
+      return sorted.filter((r) => !r.archived);
+    }
+    return sorted.filter((r) => !r.archived && r.priority === raceFilter);
+  }, [races, raceFilter]);
 
   const s = StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
@@ -949,7 +967,10 @@ export default function ProvasScreen() {
           Próxima prova: {nextRace ? `${nextRace.name} · ${nextRace.priority} · ${formatDateBR(nextRace.date)}` : "—"}
         </Text>
         <Text style={s.pageSubtitle}>
-          Próxima P1 (alvo): {p1Race ? `${p1Race.name} · ${formatDateBR(p1Race.date)}` : "—"}
+          Macrociclo (âncora): {anchorRace ? `${anchorRace.name} · ${anchorRace.priority} · ${formatDateBR(anchorRace.date)}` : "—"}
+        </Text>
+        <Text style={s.pageSubtitle}>
+          Próxima P1 (ref): {nextP1Race ? `${nextP1Race.name} · ${formatDateBR(nextP1Race.date)}` : "—"}
         </Text>
 
         {/* ── PRE-RACE LOGISTICS (≤2 days) ──────────── */}
@@ -960,45 +981,45 @@ export default function ProvasScreen() {
               <React.Fragment key={race.id}>
                 <LogisticsCard
                   race={race}
-                  p1DateISO={p1Race?.date ?? race.date}
+                  p1DateISO={anchorRace?.date ?? race.date}
                   colors={colors}
                   onGeneratePDF={handleGenerateLogisticsPDF}
                 />
-                {(!p1Race || race.id !== p1Race.id) && <StravaSection race={race} colors={colors} />}
+                {(!anchorRace || race.id !== anchorRace.id) && <StravaSection race={race} colors={colors} />}
               </React.Fragment>
             ))}
           </>
         )}
 
         {/* ── P1 HERO CARD ──────────────────────────── */}
-        {p1Race && (
+        {anchorRace && (
           <View style={s.raceHeroCard}>
             <View style={s.raceHeroRow}>
               <View style={{ flex: 1, marginRight: 12 }}>
-                <Text style={[s.raceTag, { color: PRIORITY_COLORS.P1 }]}>PROVA ALVO — P1</Text>
-                <Text style={s.raceName}>{p1Race.name}</Text>
-                <Text style={s.raceRoleDesc}>{RACE_ROLE.P1.description}</Text>
+                <Text style={[s.raceTag, { color: PRIORITY_COLORS[anchorRace.priority] }]}>ÂNCORA DO MACROCICLO · {anchorRace.priority}</Text>
+                <Text style={s.raceName}>{anchorRace.name}</Text>
+                <Text style={s.raceRoleDesc}>{RACE_ROLE[anchorRace.priority].description}</Text>
               </View>
-              <View style={[s.raceDistanceBadge, { backgroundColor: PRIORITY_COLORS.P1 }]}>
-                <Text style={s.raceDistanceNum}>{p1Race.distanceKm}</Text>
+              <View style={[s.raceDistanceBadge, { backgroundColor: PRIORITY_COLORS[anchorRace.priority] }]}>
+                <Text style={s.raceDistanceNum}>{anchorRace.distanceKm}</Text>
                 <Text style={s.raceDistanceUnit}>KM</Text>
               </View>
             </View>
             <View style={s.raceMetaRow}>
               <View style={s.raceMeta}>
                 <Feather name="calendar" size={12} color={colors.mutedForeground} />
-                <Text style={s.raceMetaText}>{formatDateBR(p1Race.date)}</Text>
+                <Text style={s.raceMetaText}>{formatDateBR(anchorRace.date)}</Text>
               </View>
-              {p1Race.raceStartTime && (
+              {anchorRace.raceStartTime && (
                 <View style={s.raceMeta}>
                   <Feather name="clock" size={12} color={colors.mutedForeground} />
-                  <Text style={s.raceMetaText}>Largada {p1Race.raceStartTime}h</Text>
+                  <Text style={s.raceMetaText}>Largada {anchorRace.raceStartTime}h</Text>
                 </View>
               )}
-              {p1Race.address && (
+              {anchorRace.address && (
                 <View style={s.raceMeta}>
                   <Feather name="map-pin" size={12} color={colors.mutedForeground} />
-                  <Text style={[s.raceMetaText, { flex: 1 }]} numberOfLines={1}>{p1Race.address}</Text>
+                  <Text style={[s.raceMetaText, { flex: 1 }]} numberOfLines={1}>{anchorRace.address}</Text>
                 </View>
               )}
             </View>
@@ -1022,8 +1043,8 @@ export default function ProvasScreen() {
         )}
 
         {/* ── STRAVA (P1 post-race or always) ──────── */}
-        {p1Race && (
-          <StravaSection race={p1Race} colors={colors} />
+        {anchorRace && (
+          <StravaSection race={anchorRace} colors={colors} />
         )}
 
         {/* ── ACTION BUTTONS ────────────────────────── */}
@@ -1037,47 +1058,84 @@ export default function ProvasScreen() {
           </Pressable>
           <Pressable
             style={({ pressed }) => [s.actionBtn, { borderColor: colors.border, opacity: pressed ? 0.7 : 1 }]}
-            onPress={() => p1Race && openEdit(p1Race)}
+            onPress={() => anchorRace && openEdit(anchorRace)}
           >
             <Feather name="edit-2" size={12} color={colors.mutedForeground} />
-            <Text style={[s.actionBtnText, { color: colors.mutedForeground }]}>EDITAR P1</Text>
+            <Text style={[s.actionBtnText, { color: colors.mutedForeground }]}>EDITAR ÂNCORA</Text>
           </Pressable>
         </View>
 
-        {/* ── SECONDARY RACES ───────────────────────── */}
-        {secondaryRaces.length > 0 && (
-          <>
-            <Text style={s.sectionLabel}>PROVAS SECUNDÁRIAS</Text>
-            {secondaryRaces.map((race) => {
-              const col = PRIORITY_COLORS[race.priority];
-              const d = getDaysUntilRace(race.date);
-              const role = RACE_ROLE[race.priority];
-              const val = validateRacePlacement(race, p1Race?.date ?? race.date);
-              return (
-                <Pressable
-                  key={race.id}
-                  style={({ pressed }) => [
-                    s.secondaryCard,
-                    { backgroundColor: col + "0D", borderColor: val.warning ? "#FF980033" : col + "33", opacity: pressed ? 0.8 : 1 }
-                  ]}
-                  onPress={() => openEdit(race)}
-                >
-                  <View style={[s.priorityBadge, { backgroundColor: col + "22" }]}>
-                    <Text style={[s.priorityBadgeText, { color: col }]}>{race.priority}</Text>
-                  </View>
-                  <View style={s.secondaryInfo}>
-                    <Text style={s.secondaryName}>{race.name}</Text>
-                    <Text style={s.secondaryMeta}>
-                      {race.distanceKm}km · {formatDateBR(race.date)} · {d > 0 ? `${d} dias` : "Passada"}
+        <Text style={s.sectionLabel}>TODAS AS PROVAS</Text>
+        <View style={s.chipRow}>
+          {(["TODAS", "P1", "P2", "P3", "PASSADAS"] as const).map((f) => {
+            const active = raceFilter === f;
+            const col =
+              f === "P1" ? PRIORITY_COLORS.P1 :
+              f === "P2" ? PRIORITY_COLORS.P2 :
+              f === "P3" ? PRIORITY_COLORS.P3 :
+              colors.primary;
+            return (
+              <Pressable
+                key={f}
+                style={({ pressed }) => [
+                  s.chip,
+                  {
+                    borderColor: active ? col : colors.border,
+                    backgroundColor: active ? col + "22" : "transparent",
+                    opacity: pressed ? 0.7 : 1,
+                  },
+                ]}
+                onPress={() => setRaceFilter(f as any)}
+              >
+                <Text style={[s.chipText, { color: active ? col : colors.mutedForeground }]}>{f}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {racesForList.length === 0 ? (
+          <Text style={{ fontSize: 12, color: colors.mutedForeground, lineHeight: 16 }}>
+            Nenhuma prova nesta categoria.
+          </Text>
+        ) : (
+          racesForList.map((race) => {
+            const col = PRIORITY_COLORS[race.priority];
+            const d = getDaysUntilRace(race.date);
+            const role = RACE_ROLE[race.priority];
+            const val = validateRacePlacement(race, anchorRace?.date ?? race.date);
+            const isAnchor = anchorId && race.id === anchorId;
+            return (
+              <Pressable
+                key={race.id}
+                style={({ pressed }) => [
+                  s.secondaryCard,
+                  {
+                    backgroundColor: col + "0D",
+                    borderColor: val.warning ? "#FF980033" : col + "33",
+                    opacity: pressed ? 0.8 : 1,
+                  },
+                ]}
+                onPress={() => openEdit(race)}
+              >
+                <View style={[s.priorityBadge, { backgroundColor: col + "22" }]}>
+                  <Text style={[s.priorityBadgeText, { color: col }]}>{race.priority}</Text>
+                </View>
+                <View style={s.secondaryInfo}>
+                  <Text style={s.secondaryName}>{race.name}{isAnchor ? " · ÂNCORA" : ""}</Text>
+                  <Text style={s.secondaryMeta}>
+                    {race.distanceKm}km · {formatDateBR(race.date)} · {d > 0 ? `${d} dias` : "Passada"}
+                  </Text>
+                  <Text style={s.secondaryRole}>{role.description.split(".")[0]}.</Text>
+                  {val.warning && (
+                    <Text style={{ fontSize: 9, color: "#FF9800", marginTop: 2 }}>
+                      ⚠️ Verificar posicionamento no ciclo
                     </Text>
-                    <Text style={s.secondaryRole}>{role.description.split(".")[0]}.</Text>
-                    {val.warning && <Text style={{ fontSize: 9, color: "#FF9800", marginTop: 2 }}>⚠️ Verificar posicionamento no ciclo</Text>}
-                  </View>
-                  <Feather name="chevron-right" size={14} color={colors.mutedForeground} />
-                </Pressable>
-              );
-            })}
-          </>
+                  )}
+                </View>
+                <Feather name={isAnchor ? "star" : "chevron-right"} size={14} color={colors.mutedForeground} />
+              </Pressable>
+            );
+          })
         )}
 
         {/* ── EDIT / NEW FORM ───────────────────────── */}
@@ -1116,6 +1174,21 @@ export default function ProvasScreen() {
               <Text style={{ fontSize: 10, color: colors.mutedForeground, marginTop: 6, lineHeight: 15, fontStyle: "italic" as const }}>
                 {RACE_ROLE[draftPriority].description}
               </Text>
+            </View>
+
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <View style={{ flex: 1, paddingRight: 12 }}>
+                <Text style={s.inputLabel}>ÂNCORA DO MACROCICLO</Text>
+                <Text style={{ fontSize: 10, color: colors.mutedForeground, lineHeight: 15 }}>
+                  Define qual prova dita a fase/semana do ciclo de 16 semanas.
+                </Text>
+              </View>
+              <Switch
+                value={draftIsAnchor}
+                onValueChange={setDraftIsAnchor}
+                trackColor={{ false: colors.border, true: colors.primary + "88" }}
+                thumbColor={draftIsAnchor ? colors.primary : colors.mutedForeground}
+              />
             </View>
 
             {/* Name */}
@@ -1202,12 +1275,12 @@ export default function ProvasScreen() {
             {editingId && races.length > 1 && (
               <Pressable
                 style={({ pressed }) => [s.deleteBtn, { opacity: pressed ? 0.7 : 1 }]}
-                onPress={() => Alert.alert("Excluir prova?", "Esta ação não pode ser desfeita.", [
+                onPress={() => Alert.alert("Arquivar prova?", "Ela não aparecerá mais nas listas principais.", [
                   { text: "Cancelar", style: "cancel" },
-                  { text: "Excluir", style: "destructive", onPress: () => handleDelete(editingId) },
+                  { text: "Arquivar", style: "destructive", onPress: () => handleDelete(editingId) },
                 ])}
               >
-                <Text style={s.deleteBtnText}>EXCLUIR PROVA</Text>
+                <Text style={s.deleteBtnText}>ARQUIVAR PROVA</Text>
               </Pressable>
             )}
 
@@ -1234,13 +1307,15 @@ export default function ProvasScreen() {
             const phase = getPhase(week);
             const phaseColor = getPhaseColor(phase);
             const vol = getWeeklyVolume(week);
-            const weekDate = getWeekRaceDateISO(p1Race?.date ?? profile.targetRaceDate, week);
+            const anchorDateISO = anchorRace?.date ?? profile.targetRaceDate;
+            const weekDate = getWeekRaceDateISO(anchorDateISO, week);
             const isCurrentWeek = week === currentWeek;
             const isRaceWeek = week === 16;
             const isRecovery = week % 4 === 0 && week !== 16;
-            const secondaryRaceThisWeek = secondaryRaces.find((r) => {
-              const d = getDaysUntilRace(r.date);
-              const rWeek = 16 - Math.ceil(d / 7);
+            const secondaryRaceThisWeek = races.find((r) => {
+              if (r.archived) return false;
+              if (anchorRace && r.id === anchorRace.id) return false;
+              const rWeek = getRaceWeekInCycle(anchorDateISO, r.date);
               return rWeek === week;
             });
             return (
@@ -1249,7 +1324,7 @@ export default function ProvasScreen() {
                 <View style={[s.calendarPhase, { backgroundColor: phaseColor }]} />
                 <View style={s.calendarInfo}>
                   <Text style={[s.calendarWeekLabel, isCurrentWeek && { color: colors.primary }]}>
-                    {isRaceWeek ? `PROVA — ${p1Race?.name ?? profile.targetRaceName}` : `Semana ${week} · ${phase}`}
+                    {isRaceWeek ? `PROVA — ${anchorRace?.name ?? profile.targetRaceName}` : `Semana ${week} · ${phase}`}
                     {isCurrentWeek ? " ◀" : ""}
                   </Text>
                   <Text style={s.calendarSubLabel}>
@@ -1259,7 +1334,7 @@ export default function ProvasScreen() {
                   </Text>
                 </View>
                 <Text style={[s.calendarVol, { color: isRaceWeek ? colors.primary : phaseColor }]}>
-                  {isRaceWeek ? `${p1Race?.distanceKm ?? profile.targetRaceDistanceKm}km` : `${vol}km`}
+                  {isRaceWeek ? `${anchorRace?.distanceKm ?? profile.targetRaceDistanceKm}km` : `${vol}km`}
                 </Text>
               </View>
             );

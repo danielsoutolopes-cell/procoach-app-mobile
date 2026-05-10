@@ -239,9 +239,6 @@ export const ProCoachAPI = {
     );
   },
 
-  async getPlan(opts: { from?: string; to?: string } = {}) {
-    const qs = new URLSearchParams();
-
   async importPlanText(text: string) {
     return request<{ imported: number; firstDate: string; lastDate: string; year?: number }>(
       `/procoach/me/plan/import-text`,

@@ -471,6 +471,12 @@ router.post("/procoach/me/workouts", async (req: Request, res: Response) => {
 
   await upsertWorkoutFeedback({ athleteId, entryDate, rpe, painLevel, notes });
 
+  const adherence = type === "corrida" && roundedKm >= 3;
+  if (!adherence) {
+    res.json({ entry });
+    return;
+  }
+
   const existing = await db
     .select()
     .from(weeklyStatsTable)
@@ -718,17 +724,19 @@ router.post("/procoach/me/workouts/:id/set-shoe", async (req: Request, res: Resp
 
 router.get("/procoach/me/weekly-stats", async (_req: Request, res: Response) => {
   const athleteId = await getOrCreateMonoAthleteId();
-
-  const stats = await db
-    .select()
-    .from(weeklyStatsTable)
-    .where(eq(weeklyStatsTable.athleteId, athleteId) as any);
+  const rows = await db.execute(sql`
+    SELECT week, COALESCE(SUM(distance_km), 0)::int AS completed_km
+    FROM procoach_workout_entries
+    WHERE athlete_id = ${athleteId}
+      AND type = 'corrida'
+      AND distance_km >= 3
+    GROUP BY week
+  `) as { rows: Array<{ week: number; completed_km: number }> };
 
   const weeklyCompleted: Record<number, number> = {};
-  for (const s of stats) {
-    weeklyCompleted[s.week] = s.completedKm;
+  for (const r of rows.rows) {
+    weeklyCompleted[Number(r.week)] = Number(r.completed_km) || 0;
   }
-
   res.json({ weeklyCompleted });
 });
 
@@ -1094,6 +1102,8 @@ router.get("/procoach/me/compliance", async (req: Request, res: Response) => {
     WHERE athlete_id = ${athleteId}
       AND entry_date >= ${fromSafe}
       AND entry_date <= ${to}
+      AND type = 'corrida'
+      AND distance_km >= 3
   `) as { rows: Array<{ completed_sessions: number; completed_km: number }> };
 
   res.json({

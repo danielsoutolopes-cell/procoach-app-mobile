@@ -6,6 +6,7 @@ import {
   athletesTable,
   stravaTokensTable,
   workoutEntriesTable,
+  weeklyStatsTable,
 } from "@workspace/db/schema";
 
 const router: IRouter = Router();
@@ -174,6 +175,32 @@ async function syncActivitiesForAthlete(
       source: "strava",
       externalId: act.id,
     });
+
+    if (procoachType === "corrida" && distKm >= 3) {
+      const existing = await db
+        .select()
+        .from(weeklyStatsTable)
+        .where(and(eq(weeklyStatsTable.athleteId, athleteId), eq(weeklyStatsTable.week, weekNum)) as any)
+        .limit(1);
+
+      if (existing.length === 0) {
+        await db.insert(weeklyStatsTable).values({
+          athleteId,
+          week: weekNum,
+          completedKm: distKm,
+          sessionsCount: 1,
+        });
+      } else {
+        await db
+          .update(weeklyStatsTable)
+          .set({
+            completedKm: existing[0]!.completedKm + distKm,
+            sessionsCount: existing[0]!.sessionsCount + 1,
+            updatedAt: new Date(),
+          })
+          .where(and(eq(weeklyStatsTable.athleteId, athleteId), eq(weeklyStatsTable.week, weekNum)));
+      }
+    }
     imported++;
   }
   return imported;

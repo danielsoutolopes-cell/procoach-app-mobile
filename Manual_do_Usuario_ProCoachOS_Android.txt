@@ -33,8 +33,11 @@ O que você deve ver (esperado):
 - Seus dados são salvos no servidor (Neon) automaticamente.
 
 2.2 Prova Alvo (regra)
-- A Prova Alvo exibida no app deve ser sempre a próxima prova “P1” (pela data).
-- Na tela de Provas, você vê “Próxima prova” e “Próxima P1 (alvo)”.
+- Você pode ter várias provas P1/P2/P3 cadastradas.
+- Na tela de Provas, o app separa:
+  - “Próxima prova”: a próxima por data (calendário).
+  - “Macrociclo (âncora)”: a prova que dita a semana/fase do ciclo de 16 semanas.
+  - “Próxima P1 (ref)”: a próxima prova marcada como P1 (apenas referência).
 
 2.3 Treino do Dia x Plano Importado
 - Treino do dia: o treino que aparece para você executar hoje (pode ser do app/IA).
@@ -338,7 +341,10 @@ Checklist:
 12.6 “Não recebo mensagens do Telegram”
 Checklist:
 - Verifique permissões de notificação no Android (se aplicável).
-- Verifique se o agendamento/cron do servidor está ativo (daily e nightly 22h).
+- O envio das 22h depende de um agendamento externo (GitHub Actions).
+  - No GitHub do projeto, configure o Secret `TELEGRAM_CRON_SECRET`.
+  - Garanta que o servidor tenha `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` e `TELEGRAM_CRON_SECRET`.
+  - Rode manualmente o workflow “Telegram Nightly Briefing” (workflow_dispatch) para testar.
 
 
 13) SEGURANÇA (MUITO IMPORTANTE)

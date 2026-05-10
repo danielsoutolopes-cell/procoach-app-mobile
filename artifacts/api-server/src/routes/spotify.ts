@@ -32,8 +32,9 @@ async function getAccessToken(): Promise<string> {
     },
     body: "grant_type=client_credentials",
   });
-  if (!res.ok) throw new Error(`Spotify token error: ${res.status}`);
-  const data = (await res.json()) as { access_token: string; expires_in: number };
+  const tokenText = await res.text().catch(() => "");
+  if (!res.ok) throw new Error(`Spotify token error: ${res.status}: ${tokenText || "(no body)"}`);
+  const data = JSON.parse(tokenText) as { access_token: string; expires_in: number };
   cachedToken    = data.access_token;
   tokenExpiresAt = Date.now() + data.expires_in * 1000;
   return cachedToken;
@@ -91,7 +92,10 @@ router.get("/spotify/playlist-for-workout", async (req: Request, res: Response) 
     const searchRes = await fetch(searchUrl.toString(), {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!searchRes.ok) throw new Error(`Spotify search error: ${searchRes.status}`);
+    if (!searchRes.ok) {
+      const t = await searchRes.text().catch(() => "");
+      throw new Error(`Spotify search error: ${searchRes.status}: ${t || "(no body)"}`);
+    }
 
     const searchData = (await searchRes.json()) as {
       playlists: {
@@ -138,7 +142,12 @@ router.get("/spotify/playlist-for-workout", async (req: Request, res: Response) 
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Spotify unavailable";
     req.log.error({ err: msg }, "Spotify playlist fetch failed");
-    if (msg.includes("não configurado")) {
+    if (
+      msg.includes("não configurado") ||
+      msg.includes("invalid_client") ||
+      msg.includes("Spotify token error: 400") ||
+      msg.includes("Spotify token error: 401")
+    ) {
       res.status(503).json({ error: msg });
       return;
     }

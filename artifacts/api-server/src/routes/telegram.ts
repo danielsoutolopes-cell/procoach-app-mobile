@@ -1136,7 +1136,7 @@ router.post("/telegram/daily", async (req: Request, res: Response) => {
 
     const wLine =
       workouts.length > 0
-        ? workouts.map((w) => `🔹 *${w.type.toUpperCase()}* — *${roundKm(w.distanceKm)}km*`).join("\n")
+        ? workouts.map((w: { type: string; distanceKm: number }) => `🔹 *${w.type.toUpperCase()}* — *${roundKm(w.distanceKm)}km*`).join("\n")
         : `🔹 *${roundKm(targetKm / 5)}km* — *${phase.paceTarget}* (sugestão)`;
 
     await sendTelegram(

@@ -106,7 +106,7 @@ async function processStravaActivity(athleteId: number, activityId: number) {
       })
     });
 
-    const tokenData = await tokenResponse.json();
+    const tokenData = await tokenResponse.json() as any;
     const accessToken = tokenData.access_token;
 
     if (!accessToken) {
@@ -117,7 +117,7 @@ async function processStravaActivity(athleteId: number, activityId: number) {
     const activityResponse = await fetch(`https://www.strava.com/api/v3/activities/${activityId}`, {
       headers: { Authorization: `Bearer ${accessToken}` }
     });
-    const activityData = await activityResponse.json();
+    const activityData = await activityResponse.json() as any;
 
     const distKm = Math.round(activityData.distance / 1000);
     const durMin = Math.round((activityData.moving_time || activityData.elapsed_time) / 60);

@@ -3,10 +3,10 @@ import { db, eq, and } from '@workspace/db';
 import { workoutEntriesTable, weeklyStatsTable, athletesTable } from '@workspace/db/schema';
 import { getOrCreateMonoAthleteId } from './migrations';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import * as admin from 'firebase-admin';
+import admin from 'firebase-admin';
 
 // Inicializa o Firebase Admin SDK
-if (!admin.apps.length) {
+if (!admin.apps?.length) {
   try {
     admin.initializeApp({
       credential: admin.credential.applicationDefault(),

@@ -37,7 +37,7 @@ class BioimpedanceService {
 
   /// Faz o upload do PDF de bioimpedância para o backend Node.js,
   /// onde o Gemini fará a leitura via OCR/Vision.
-  Future<void> uploadBioimpedancePdf(String athleteId, File file) async {
+  Future<void> uploadBioimpedancePdf(File file) async {
     final formData = FormData.fromMap({
       'file': await MultipartFile.fromFile(
         file.path,
@@ -46,13 +46,13 @@ class BioimpedanceService {
     });
 
     // Ajuste a rota para bater com o endpoint do seu Cérebro/Node.js
-    await _dio.post('/athletes/$athleteId/bioimpedance/upload', data: formData);
+    await _dio.post('/athletes/me/bioimpedance/upload', data: formData);
   }
 
   /// Retorna a última bioimpedância do atleta.
-  Future<Bioimpedance?> getLatestBioimpedance(String athleteId) async {
+  Future<Bioimpedance?> getLatestBioimpedance() async {
     try {
-      final response = await _dio.get('/athletes/$athleteId/bioimpedance/latest');
+      final response = await _dio.get('/athletes/me/bioimpedance/latest');
       if (response.data == null || response.data.toString().isEmpty) return null;
       return Bioimpedance.fromJson(response.data);
     } on DioException catch (e) {

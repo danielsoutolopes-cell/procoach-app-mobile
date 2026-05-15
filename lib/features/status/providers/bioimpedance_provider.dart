@@ -10,7 +10,6 @@ class BioimpedanceNotifier extends AsyncNotifier<Bioimpedance?> {
   @override
   FutureOr<Bioimpedance?> build() async {
     final service = ref.watch(bioimpedanceServiceProvider);
-    const monoAthleteId = '1'; // App mono-usuário
-    return await service.getLatestBioimpedance(monoAthleteId);
+    return await service.getLatestBioimpedance();
   }
 }

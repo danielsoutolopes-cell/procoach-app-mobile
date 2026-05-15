@@ -1,8 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:procoach_os/core/router/app_router.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'firebase_options.dart';
+import 'package:dio/dio.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await dotenv.load(fileName: ".env");
+  try {
+    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    await _setupPushNotifications();
+  } catch (e) {
+    debugPrint('Firebase não inicializado: $e');
+  }
+
   // O ProviderScope é o coração do Riverpod. Ele envolve o app inteiro 
   // para que os nossos Providers (como o athleteProvider) funcionem globalmente.
   runApp(
@@ -10,6 +24,31 @@ void main() {
       child: ProCoachApp(),
     ),
   );
+}
+
+Future<void> _setupPushNotifications() async {
+  final messaging = FirebaseMessaging.instance;
+  
+  // Solicita permissão do sistema para exibir alertas
+  await messaging.requestPermission(alert: true, badge: true, sound: true);
+  
+  // Gera o identificador único deste aparelho para o Firebase
+  final fcmToken = await messaging.getToken();
+  debugPrint('🔥 Token FCM (Substitui o Expo): $fcmToken');
+  
+  if (fcmToken != null) {
+    try {
+      // Envia o token para o backend (Neon DB) para substituir o expoPushToken
+      final dio = Dio();
+      await dio.patch(
+        'https://coach-pro-v8e4.onrender.com/api/procoach/athletes/me/push-token',
+        data: {'token': fcmToken},
+      );
+      debugPrint('✅ Token FCM salvo no servidor!');
+    } catch (e) {
+      debugPrint('❌ Erro ao salvar Token FCM: $e');
+    }
+  }
 }
 
 class ProCoachApp extends ConsumerWidget {

@@ -12,9 +12,8 @@ class NextWorkoutNotifier extends AsyncNotifier<Workout?> {
   @override
   FutureOr<Workout?> build() async {
     final dio = ref.watch(dioProvider);
-    const monoAthleteId = '1';
     try {
-      final response = await dio.get('/athletes/$monoAthleteId/workouts/next');
+      final response = await dio.get('/athletes/me/workouts/next');
       if (response.data == null) return null;
       return Workout.fromJson(response.data);
     } on DioException catch (e) {

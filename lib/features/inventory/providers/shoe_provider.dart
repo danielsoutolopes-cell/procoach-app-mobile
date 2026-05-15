@@ -11,7 +11,6 @@ class ShoeNotifier extends AsyncNotifier<List<Shoe>> {
   @override
   FutureOr<List<Shoe>> build() async {
     final shoeService = ref.watch(shoeServiceProvider);
-    const monoAthleteId = '1'; // App mono-usuário
-    return await shoeService.getAthleteShoes(monoAthleteId);
+    return await shoeService.getAthleteShoes();
   }
 }

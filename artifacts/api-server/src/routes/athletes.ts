@@ -4,6 +4,7 @@ import { athletesTable } from '@workspace/db/schema';
 import multer from 'multer';
 import fs from 'fs';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { getOrCreateMonoAthleteId } from './migrations';
 
 export const athletesRouter = Router();
 
@@ -11,9 +12,9 @@ export const athletesRouter = Router();
 const upload = multer({ dest: 'uploads/' });
 
 // 1. GET /profile - Busca o perfil e estoque de géis do Atleta
-athletesRouter.get('/:id/profile', async (req: Request, res: Response) => {
+athletesRouter.get('/me/profile', async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = await getOrCreateMonoAthleteId();
     const rows = await db.select().from(athletesTable).where(eq(athletesTable.id, id)).limit(1);
     const athlete = rows[0];
     
@@ -22,13 +23,23 @@ athletesRouter.get('/:id/profile', async (req: Request, res: Response) => {
       return;
     }
 
+    // MOCK: Injetando uma Prova Âncora para daqui a 2 dias para ativar o "Modo Race Day"
+    const nextRace = new Date();
+    nextRace.setDate(nextRace.getDate() + 2);
+
     res.json({
       id: athlete.id.toString(),
       name: athlete.name || 'CEO',
       // O campo gelInventory pode não estar mapeado formalmente no schema yet, 
       // usamos um fallback seguro caso não exista.
       gel_inventory: (athlete as any).gelInventory ?? 10, 
-      races: [], // Retorne as provas do banco aqui no futuro
+      races: [{
+        id: '1',
+        name: 'Meia Maratona (Alvo)',
+        date: nextRace.toISOString(),
+        type: 'p1',
+        is_anchor: true
+      }],
     });
   } catch (err) {
     console.error('[API] Erro ao buscar perfil:', err);
@@ -36,10 +47,30 @@ athletesRouter.get('/:id/profile', async (req: Request, res: Response) => {
   }
 });
 
-// 2. PATCH /gels - Atualiza o estoque de géis (Atualização Otimista)
-athletesRouter.patch('/:id/gels', async (req: Request, res: Response) => {
+// 10. POST /race-strategy - Gera a Estratégia de Prova com Gemini
+athletesRouter.post('/me/race-strategy', async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id as string);
+    const { raceName } = req.body;
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
+    const model = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL || "gemini-2.5-flash" });
+
+    const prompt = `Você é um treinador de corrida de elite. Seu atleta vai correr a prova "${raceName}" muito em breve.
+Crie uma estratégia de prova curta e tática.
+Inclua 3 bullet points práticos (Ex: pacing, hidratação, mentalidade).
+Seja direto, inspirador e não use formatação markdown excessiva além dos bullets.`;
+
+    const result = await model.generateContent(prompt);
+    res.json({ strategy: result.response.text() });
+  } catch (err) {
+    console.error('[API] Erro na IA de Race Strategy:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// 2. PATCH /gels - Atualiza o estoque de géis (Atualização Otimista)
+athletesRouter.patch('/me/gels', async (req: Request, res: Response) => {
+  try {
+    const id = await getOrCreateMonoAthleteId();
     const { gel_inventory } = req.body;
     
     // Usamos raw SQL para injetar direto na coluna correta no Postgres
@@ -52,7 +83,7 @@ athletesRouter.patch('/:id/gels', async (req: Request, res: Response) => {
 });
 
 // 3. GET /shoes - Retorna a Rotação de Tênis
-athletesRouter.get('/:id/shoes', async (req: Request, res: Response) => {
+athletesRouter.get('/me/shoes', async (req: Request, res: Response) => {
   try {
     // TODO: Criar a tabela `procoach_shoes`. Por enquanto, enviamos o Mock 
     // para o app não quebrar e mostrar algo na tela.
@@ -66,9 +97,9 @@ athletesRouter.get('/:id/shoes', async (req: Request, res: Response) => {
 });
 
 // 4. GET /workouts/today - Lê da tabela plan_sessions a missão do dia
-athletesRouter.get('/:id/workouts/today', async (req: Request, res: Response) => {
+athletesRouter.get('/me/workouts/today', async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = await getOrCreateMonoAthleteId();
     const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
     
     const rows = await db.execute(sql`
@@ -100,9 +131,9 @@ athletesRouter.get('/:id/workouts/today', async (req: Request, res: Response) =>
 });
 
 // 5. GET /bioimpedance/latest - Busca o último registro de biometria lançado
-athletesRouter.get('/:id/bioimpedance/latest', async (req: Request, res: Response) => {
+athletesRouter.get('/me/bioimpedance/latest', async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = await getOrCreateMonoAthleteId();
     const rows = await db.execute(sql`
       SELECT weight_kg, body_fat_pct, muscle_mass_kg
       FROM procoach_bioimpedance
@@ -148,9 +179,9 @@ athletesRouter.get('/:id/bioimpedance/latest', async (req: Request, res: Respons
 });
 
 // 6. POST /bioimpedance/upload - Recebe o PDF vindo do Flutter
-athletesRouter.post('/:id/bioimpedance/upload', upload.single('file'), async (req: Request, res: Response) => {
+athletesRouter.post('/me/bioimpedance/upload', upload.single('file'), async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = await getOrCreateMonoAthleteId();
     if (!req.file) {
       res.status(400).json({ error: 'No file uploaded' });
       return;
@@ -162,7 +193,7 @@ athletesRouter.post('/:id/bioimpedance/upload', upload.single('file'), async (re
     const base64Data = fileBytes.toString('base64');
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL || "gemini-2.5-flash" });
 
     const prompt = `Você é um especialista em nutrição e leitura de exames.
 Analise o PDF de bioimpedância em anexo e extraia exatamente as seguintes métricas num JSON válido:
@@ -229,9 +260,9 @@ Caso alguma métrica não exista no documento, retorne null no valor. Responda a
 });
 
 // 7. GET /compliance/week - Retorna os dados da semana atual para o gráfico (Segunda a Domingo)
-athletesRouter.get('/:id/compliance/week', async (req: Request, res: Response) => {
+athletesRouter.get('/me/compliance/week', async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = await getOrCreateMonoAthleteId();
 
     // Retorna para a segunda-feira atual (fuso horário SP)
     const nowSp = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
@@ -283,9 +314,9 @@ athletesRouter.get('/:id/compliance/week', async (req: Request, res: Response) =
 });
 
 // 8. GET /workouts/next - Retorna o próximo treino planejado (amanhã em diante)
-athletesRouter.get('/:id/workouts/next', async (req: Request, res: Response) => {
+athletesRouter.get('/me/workouts/next', async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = await getOrCreateMonoAthleteId();
     const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
 
     const rows = await db.execute(sql`
@@ -318,14 +349,35 @@ athletesRouter.get('/:id/workouts/next', async (req: Request, res: Response) => 
 });
 
 // 9. POST /workouts/feedback - Recebe RPE e Dor (Debrief)
-athletesRouter.post('/:id/workouts/feedback', async (req: Request, res: Response) => {
+athletesRouter.post('/me/workouts/feedback', async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id as string);
+    const id = await getOrCreateMonoAthleteId();
     const { rpe, painLevel } = req.body;
     // Salva a dor articular na telemetria do Atleta (Radar Articular)
     await db.execute(sql`UPDATE procoach_athletes SET pain_level = ${painLevel} WHERE id = ${id}`);
     res.json({ success: true, message: 'Feedback salvo com sucesso' });
   } catch (err) {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// 11. PATCH /push-token - Salva o token do Firebase (FCM) no banco
+athletesRouter.patch('/me/push-token', async (req: Request, res: Response) => {
+  try {
+    const id = await getOrCreateMonoAthleteId();
+    const { token } = req.body;
+    
+    if (!token) {
+      res.status(400).json({ error: 'Token is required' });
+      return;
+    }
+
+    // Atualiza a coluna existente (reaproveitando expo_push_token para armazenar o do Firebase)
+    await db.execute(sql`UPDATE procoach_athletes SET expo_push_token = ${token} WHERE id = ${id}`);
+    
+    res.json({ success: true, message: 'FCM Token salvo com sucesso' });
+  } catch (err) {
+    console.error('[API] Erro ao salvar FCM Token:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

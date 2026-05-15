@@ -1,9 +1,0 @@
-{
-  "expo": {
-    "name": "ProCoach OS",
-    "slug": "procoach-os",
-    "android": {
-      "package": "com.danielsoutolopes.workspace"
-    }
-  }
-}

@@ -15,9 +15,8 @@ class ShoeService {
   ShoeService(this._dio);
 
   /// Retorna a lista de tênis ativos do atleta.
-  Future<List<Shoe>> getAthleteShoes(String athleteId) async {
-    // Altere a rota de acordo com a configuração do seu backend Node.js
-    final response = await _dio.get('/athletes/$athleteId/shoes');
+  Future<List<Shoe>> getAthleteShoes() async {
+    final response = await _dio.get('/athletes/me/shoes');
     final List<dynamic> data = response.data;
     return data.map((json) => Shoe.fromJson(json)).toList();
   }

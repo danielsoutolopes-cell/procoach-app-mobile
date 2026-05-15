@@ -97,8 +97,7 @@ class WorkoutCard extends ConsumerWidget {
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('A guardar telemetria...')));
                       try {
                         final dio = ref.read(dioProvider);
-                        const monoAthleteId = '1';
-                        await dio.post('/athletes/$monoAthleteId/workouts/feedback', data: {
+                        await dio.post('/athletes/me/workouts/feedback', data: {
                           'rpe': rpe.round(),
                           'painLevel': pain.round(),
                         });

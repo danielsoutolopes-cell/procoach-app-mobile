@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 import 'package:procoach_os/features/athlete/providers/athlete_provider.dart';
 import 'package:procoach_os/features/dashboard/widgets/weather_card.dart';
 import 'package:procoach_os/features/dashboard/widgets/workout_card.dart';
 import 'package:procoach_os/features/dashboard/widgets/spotify_card.dart';
+import 'package:procoach_os/features/dashboard/widgets/race_day_card.dart';
 import 'package:procoach_os/shared/models/athlete.dart';
 import 'package:procoach_os/shared/widgets/async_value_widget.dart';
 
@@ -16,7 +16,10 @@ class DashboardScreen extends ConsumerWidget {
     // O Riverpod "escuta" o estado do atleta. 
     // Se a API estiver a carregar, o AsyncValueWidget trata disso!
     final athleteAsync = ref.watch(athleteProvider);
-    final today = DateFormat("dd 'de' MMMM", 'pt_BR').format(DateTime.now());
+
+    final now = DateTime.now();
+    final months = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+    final today = "${now.day} de ${months[now.month - 1]}";
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A), // Fundo escuro ProCoach
@@ -37,10 +40,19 @@ class DashboardScreen extends ConsumerWidget {
         value: athleteAsync,
         data: (athlete) {
           // Calcula os dias para a prova âncora
-          final anchorRace = athlete.races.where((r) => r.isAnchor).firstOrNull;
+          var anchorRace;
+          try {
+            anchorRace = athlete.races.where((r) => r.isAnchor).firstOrNull;
+          } catch (e) {
+            anchorRace = null;
+          }
+          
           final daysToRace = anchorRace != null 
               ? anchorRace.date.difference(DateTime.now()).inDays 
               : 0;
+              
+          // Modo Race Day ativa nos 3 dias antecedentes à prova âncora
+          final isRaceDayMode = anchorRace != null && daysToRace >= 0 && daysToRace <= 3;
 
           return RefreshIndicator(
             onRefresh: () => ref.refresh(athleteProvider.future),
@@ -63,6 +75,11 @@ class DashboardScreen extends ConsumerWidget {
                   ],
                 ),
                 const SizedBox(height: 24),
+                
+                if (isRaceDayMode) ...[
+                  RaceDayCard(race: anchorRace, daysToRace: daysToRace),
+                  const SizedBox(height: 16),
+                ],
                 
                 // Previsão de Hoje
                 const WeatherCard(),

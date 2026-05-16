@@ -15,9 +15,16 @@ class WorkoutService {
 
   /// Retorna o treino planeado para o dia atual.
   /// Retorna `null` se for dia de descanso ou não houver treino importado.
-  Future<Workout?> getTodayWorkout(String athleteId) async {
+  Future<Workout?> getTodayWorkout({double? lat, double? lon}) async {
     try {
-      final response = await _dio.get('/athletes/$athleteId/workouts/today');
+      final queryParams = <String, dynamic>{};
+      if (lat != null) queryParams['lat'] = lat;
+      if (lon != null) queryParams['lon'] = lon;
+
+      final response = await _dio.get(
+        '/athletes/me/workouts/today',
+        queryParameters: queryParams,
+      );
       if (response.data == null || response.data.toString().isEmpty) return null;
       return Workout.fromJson(response.data);
     } on DioException catch (e) {

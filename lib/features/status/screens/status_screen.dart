@@ -245,160 +245,6 @@ class StatusScreen extends ConsumerWidget {
     }
   }
 
-  Widget _buildStrengthLibraryCard(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A1A1A),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white10),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'BIBLIOTECA DE FORÇA (A/B/C)',
-            style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.2),
-          ),
-          const SizedBox(height: 16),
-          // Botões de Seleção da Ficha
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _buildFichaButton('FICHA A', true),
-              _buildFichaButton('FICHA B', false),
-              _buildFichaButton('FICHA C', false),
-            ],
-          ),
-          const SizedBox(height: 16),
-          // Nome da Ficha
-          TextField(
-            decoration: InputDecoration(
-              labelText: 'Nome da Ficha (ex: Inferiores / Potência)',
-              labelStyle: TextStyle(color: Colors.grey[600], fontSize: 12),
-              enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.white10)),
-              focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.deepOrangeAccent)),
-            ),
-            style: const TextStyle(color: Colors.white, fontSize: 14),
-          ),
-          const SizedBox(height: 16),
-          // Botão que abre o Modal de Catálogo
-          GestureDetector(
-            onTap: () => _showExerciseCatalogModal(context),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-              decoration: BoxDecoration(
-                color: Colors.black,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.white10),
-              ),
-              child: const Row(
-                children: [
-                  Icon(Icons.search, color: Colors.grey, size: 18),
-                  SizedBox(width: 8),
-                  Text(
-                    'BUSCAR EXERCÍCIO NO CATÁLOGO...',
-                    style: TextStyle(color: Colors.grey, fontSize: 12),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          // Lista de Exercícios (Mockup da Visualização)
-          _buildExerciseItem(context, 'Agachamento Livre', '4 séries x 8-10 reps', 'Carga: 80kg | RPE: 8 | Tempo: 3010'),
-          _buildExerciseItem(context, 'Cadeira Extensora', '3 séries x 12 reps', 'Descanso: 90s | Carga: 45kg'),
-          _buildExerciseItem(context, 'Mesa Flexora', '3 séries x 10 reps', 'Foco na fase excêntrica | RPE: 7'),
-          const SizedBox(height: 16),
-          // Botão Salvar
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Sincronizando ficha com o Neon DB...'),
-                    backgroundColor: Colors.deepOrangeAccent,
-                  ),
-                );
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white10,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  side: const BorderSide(color: Colors.white24),
-                ),
-              ),
-              icon: const Icon(Icons.cloud_upload, size: 18),
-              label: const Text(
-                'SALVAR FICHA NO NEON',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.0),
-              ),
-            ),
-          )
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFichaButton(String label, bool isSelected) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: isSelected ? Colors.deepOrangeAccent.withOpacity(0.15) : Colors.black,
-        border: Border.all(color: isSelected ? Colors.deepOrangeAccent : Colors.white10),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: isSelected ? Colors.deepOrangeAccent : Colors.grey,
-          fontWeight: FontWeight.bold,
-          fontSize: 12,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildExerciseItem(BuildContext context, String name, String details, String subDetails) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.black,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white10),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-              Row(
-                children: [
-                  GestureDetector(
-                    onTap: () => _showEditExerciseModal(context, name),
-                    child: const Icon(Icons.edit_outlined, color: Colors.deepOrangeAccent, size: 16),
-                  ),
-                  const SizedBox(width: 12),
-                  const Icon(Icons.drag_handle, color: Colors.grey, size: 16),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(details, style: const TextStyle(color: Colors.deepOrangeAccent, fontSize: 12, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 2),
-          Text(subDetails, style: const TextStyle(color: Colors.grey, fontSize: 11)),
-        ],
-      ),
-    );
-  }
-
   Widget _buildBioItem(String emoji, String value, String label, {double? diff, bool invertColors = false}) {
     return Column(
       children: [
@@ -608,52 +454,88 @@ class _StrengthLibraryWidgetState extends ConsumerState<StrengthLibraryWidget> {
           Text('${ex.sets} séries x ${ex.reps} reps', style: const TextStyle(color: Colors.deepOrangeAccent, fontSize: 12, fontWeight: FontWeight.bold)),
           const SizedBox(height: 2),
           Text('RPE: ${ex.rpe ?? '-'} | Descanso: ${ex.rest ?? '-'} | Carga: ${ex.weight ?? '-'}', style: const TextStyle(color: Colors.grey, fontSize: 11)),
+          if (ex.tempo != null || ex.notes != null) ...[
+            const SizedBox(height: 4),
+            if (ex.tempo != null && ex.tempo!.isNotEmpty) Text('Tempo (Cadência): ${ex.tempo}', style: const TextStyle(color: Colors.white70, fontSize: 11)),
+            if (ex.notes != null && ex.notes!.isNotEmpty) Text('Obs: ${ex.notes}', style: const TextStyle(color: Colors.grey, fontSize: 11, fontStyle: FontStyle.italic)),
+          ],
         ],
       ),
     );
   }
 
   void _showExerciseCatalogModal(BuildContext context) {
-    final catalog = ['Agachamento Livre', 'Cadeira Extensora', 'Mesa Flexora', 'Leg Press 45', 'Elevação Pélvica', 'Panturrilha Sentado', 'Supino Reto', 'Puxada Frontal', 'Desenvolvimento com Halteres', 'Rosca Direta', 'Tríceps na Polia'];
+    final fullCatalog = ['Agachamento Livre', 'Cadeira Extensora', 'Mesa Flexora', 'Leg Press 45', 'Elevação Pélvica', 'Panturrilha Sentado', 'Supino Reto', 'Puxada Frontal', 'Desenvolvimento com Halteres', 'Rosca Direta', 'Tríceps na Polia'];
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) {
+        String searchQuery = '';
         return DraggableScrollableSheet(
           initialChildSize: 0.6,
           minChildSize: 0.4,
           maxChildSize: 0.9,
           builder: (context, scrollController) {
-            return Container(
-              decoration: const BoxDecoration(color: Color(0xFF1A1A1A), borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-              child: Column(
-                children: [
-                  const SizedBox(height: 12),
-                  Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
-                  const Padding(padding: EdgeInsets.all(16.0), child: Text('CATÁLOGO DE EXERCÍCIOS', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14))),
-                  Expanded(
-                    child: ListView.builder(
-                      controller: scrollController,
-                      itemCount: catalog.length,
-                      itemBuilder: (context, index) {
-                        final exerciseName = catalog[index];
-                        return ListTile(
-                          title: Text(exerciseName, style: const TextStyle(color: Colors.white, fontSize: 14)),
-                          trailing: const Icon(Icons.add_circle_outline, color: Colors.deepOrangeAccent),
-                          onTap: () {
-                            Navigator.pop(context);
-                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$exerciseName adicionado!'), backgroundColor: Colors.green));
-                            setState(() {
-                              _exercises.add(StrengthExercise(name: exerciseName, sets: 3, reps: '10'));
+            return StatefulBuilder(
+              builder: (context, setModalState) {
+                final filteredCatalog = fullCatalog
+                    .where((ex) => ex.toLowerCase().contains(searchQuery.toLowerCase()))
+                    .toList();
+
+                return Container(
+                  decoration: const BoxDecoration(color: Color(0xFF1A1A1A), borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+                  child: Column(
+                    children: [
+                      const SizedBox(height: 12),
+                      Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
+                      const Padding(padding: EdgeInsets.all(16.0), child: Text('CATÁLOGO DE EXERCÍCIOS', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14))),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                        child: TextField(
+                          onChanged: (value) {
+                            setModalState(() {
+                              searchQuery = value;
                             });
                           },
-                        );
-                      },
-                    ),
+                          style: const TextStyle(color: Colors.white, fontSize: 14),
+                          decoration: InputDecoration(
+                            hintText: 'Buscar exercício...',
+                            hintStyle: const TextStyle(color: Colors.grey),
+                            prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                            filled: true,
+                            fillColor: Colors.black,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide.none,
+                            ),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: ListView.builder(
+                          controller: scrollController,
+                          itemCount: filteredCatalog.length,
+                          itemBuilder: (context, index) {
+                            final exerciseName = filteredCatalog[index];
+                            return ListTile(
+                              title: Text(exerciseName, style: const TextStyle(color: Colors.white, fontSize: 14)),
+                              trailing: const Icon(Icons.add_circle_outline, color: Colors.deepOrangeAccent),
+                              onTap: () {
+                                Navigator.pop(context);
+                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$exerciseName adicionado!'), backgroundColor: Colors.green));
+                                setState(() {
+                                  _exercises.add(StrengthExercise(name: exerciseName, sets: 3, reps: '10'));
+                                });
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                );
+              },
             );
           },
         );
@@ -679,6 +561,8 @@ class _StrengthLibraryWidgetState extends ConsumerState<StrengthLibraryWidget> {
     final weightController = TextEditingController(text: exercise.weight ?? '');
     final rpeController = TextEditingController(text: exercise.rpe?.toString() ?? '');
     final restController = TextEditingController(text: exercise.rest ?? '');
+    final tempoController = TextEditingController(text: exercise.tempo ?? '');
+    final notesController = TextEditingController(text: exercise.notes ?? '');
 
     showDialog(
       context: context,
@@ -686,8 +570,11 @@ class _StrengthLibraryWidgetState extends ConsumerState<StrengthLibraryWidget> {
         return AlertDialog(
           backgroundColor: const Color(0xFF1A1A1A),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
           title: Text('Editar: ${exercise.name}', style: const TextStyle(color: Colors.white, fontSize: 16)),
-          content: SingleChildScrollView(
+          content: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.45),
+            child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -738,7 +625,20 @@ class _StrengthLibraryWidgetState extends ConsumerState<StrengthLibraryWidget> {
                     ),
                   ],
                 ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: tempoController,
+                  decoration: _inputDeco('Tempo (Cadência)', 'Ex: 3010'),
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: notesController,
+                  decoration: _inputDeco('Observações', 'Ex: Focar na excêntrica'),
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                ),
               ],
+            ),
             ),
           ),
           actions: [
@@ -758,8 +658,8 @@ class _StrengthLibraryWidgetState extends ConsumerState<StrengthLibraryWidget> {
                     weight: weightController.text.isEmpty ? null : weightController.text,
                     rpe: int.tryParse(rpeController.text),
                     rest: restController.text.isEmpty ? null : restController.text,
-                    notes: exercise.notes,
-                    tempo: exercise.tempo,
+                    notes: notesController.text.isEmpty ? null : notesController.text,
+                    tempo: tempoController.text.isEmpty ? null : tempoController.text,
                   );
                 });
                 Navigator.pop(context); // Fecha o modal

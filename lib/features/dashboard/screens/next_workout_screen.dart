@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:procoach_os/features/dashboard/providers/next_workout_provider.dart';
+import 'package:procoach_os/features/dashboard/widgets/weather_card.dart';
 
 class NextWorkoutScreen extends ConsumerWidget {
   const NextWorkoutScreen({super.key});
@@ -68,6 +69,8 @@ class NextWorkoutScreen extends ConsumerWidget {
                   ],
                 ),
               ),
+              const SizedBox(height: 24),
+              WeatherCard(targetDate: workout.date),
             ],
           );
         },

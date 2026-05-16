@@ -1,10 +1,10 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:procoach_os/core/network/dio_client.dart';
 
 final weatherServiceProvider = Provider<WeatherService>((ref) {
-  // Usamos uma instância nova e limpa do Dio pois não precisamos do BaseUrl 
-  // ou interceptors (Regra de Ouro) do backend Node.js para esta API pública.
-  return WeatherService(Dio());
+  // Agora usamos o dioProvider para conectar ao backend Neon/Node.js
+  return WeatherService(ref.watch(dioProvider));
 });
 
 class WeatherInfo {
@@ -14,6 +14,15 @@ class WeatherInfo {
   final String emoji;
 
   WeatherInfo(this.temperature, this.precipitation, this.windspeed, this.emoji);
+
+  factory WeatherInfo.fromJson(Map<String, dynamic> json) {
+    return WeatherInfo(
+      json['temperature'] ?? 0,
+      json['precipitation'] ?? 0,
+      json['windspeed'] ?? 0,
+      json['emoji'] ?? '☀️',
+    );
+  }
 }
 
 class WeatherService {
@@ -21,23 +30,23 @@ class WeatherService {
 
   WeatherService(this._dio);
 
-  Future<WeatherInfo> getCurrentWeather() async {
-    // Mesmas coordenadas configuradas no seu backend (Rua Maracá / São Paulo)
-    const url = 'https://api.open-meteo.com/v1/forecast?latitude=-23.6087&longitude=-46.6676&current=temperature_2m,weathercode,windspeed_10m,precipitation&timezone=America%2FSao_Paulo';
-    final response = await _dio.get(url);
-    final current = response.data['current'];
+  Future<WeatherInfo> getCurrentWeather({DateTime? targetDate}) async {
+    try {
+      final queryParams = <String, dynamic>{};
+      
+      if (targetDate != null) {
+        queryParams['date'] = targetDate.toIso8601String().split('T')[0];
+      }
 
-    final temp = (current['temperature_2m'] as num).round();
-    final precip = (current['precipitation'] as num).round();
-    final wind = (current['windspeed_10m'] as num).round();
-    final code = current['weathercode'] as int;
+      // Chama o seu backend Node.js, usando o baseUrl padrão (ex: /api/procoach)
+      final response = await _dio.get(
+        '/weather', 
+        queryParameters: queryParams.isNotEmpty ? queryParams : null,
+      );
 
-    // Lógica de classificação visual do clima
-    String emoji = '☀️';
-    if (code <= 3) emoji = '⛅';
-    else if (code <= 67) emoji = '🌧️';
-    else emoji = '⛈️';
-
-    return WeatherInfo(temp, precip, wind, emoji);
+      return WeatherInfo.fromJson(response.data);
+    } catch (e) {
+      throw Exception('Erro ao buscar previsão do tempo: $e');
+    }
   }
 }

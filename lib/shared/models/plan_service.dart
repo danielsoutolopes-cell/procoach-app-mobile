@@ -10,7 +10,7 @@ class PlanService {
 
   Future<List<PlanSession>> getPlanSessions() async {
     try {
-      final response = await _dio.get('/api/procoach/athletes/me/plan-sessions');
+      final response = await _dio.get('/athletes/me/plan-sessions');
       final data = response.data as List;
       return data.map((e) => PlanSession.fromJson(e as Map<String, dynamic>)).toList();
     } catch (e) {

@@ -10,7 +10,7 @@ class StrengthService {
 
   Future<List<StrengthRoutine>> getStrengthRoutines() async {
     try {
-      final response = await _dio.get('/api/procoach/athletes/me/strength-routines');
+      final response = await _dio.get('/athletes/me/strength-routines');
       final data = response.data as List;
       return data.map((e) => StrengthRoutine.fromJson(e)).toList();
     } catch (e) {
@@ -20,7 +20,7 @@ class StrengthService {
 
   Future<void> saveStrengthRoutine(StrengthRoutine routine) async {
     await _dio.post(
-      '/api/procoach/athletes/me/strength-routine',
+      '/athletes/me/strength-routine',
       data: routine.toJson(),
     );
   }

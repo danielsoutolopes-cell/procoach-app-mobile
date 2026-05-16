@@ -3,11 +3,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:procoach_os/features/dashboard/providers/weather_provider.dart';
 
 class WeatherCard extends ConsumerWidget {
-  const WeatherCard({super.key});
+  final DateTime? targetDate;
+
+  const WeatherCard({super.key, this.targetDate});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Passando a data para o Provider! 
+    // (Veja a Nota de Arquiteto abaixo sobre como atualizar o arquivo weather_provider.dart)
     final weatherAsync = ref.watch(weatherProvider);
+    
+    final title = targetDate != null ? 'PREVISÃO PARA O TREINO' : 'PREVISÃO DE HOJE';
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -19,8 +25,8 @@ class WeatherCard extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'PREVISÃO DE HOJE',
+          Text(
+            title,
             style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.2),
           ),
           const SizedBox(height: 16),

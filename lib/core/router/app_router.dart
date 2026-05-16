@@ -6,7 +6,7 @@ import 'package:procoach_os/features/dashboard/screens/dashboard_screen.dart';
 import 'package:procoach_os/features/inventory/screens/inventory_screen.dart';
 import 'package:procoach_os/features/dashboard/screens/next_workout_screen.dart';
 import 'package:procoach_os/features/status/screens/status_screen.dart';
-import 'package:procoach_os/features/plan/screens/plan_screen.dart';
+import 'package:procoach_os/shared/models/plan_screen.dart';
 
 /// Provider que expõe as nossas Rotas. 
 /// Utilizar Riverpod aqui permite que futuramente façamos redirecionamentos 

@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:procoach_os/core/network/interceptors/rounding_interceptor.dart';
+import 'package:procoach_os/core/network/interceptors/auth_interceptor.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 /// Provider do Riverpod que cria e expõe uma instância única (singleton) do Dio.
@@ -21,6 +22,7 @@ final dioProvider = Provider<Dio>((ref) {
 
   // Adicionando nosso interceptor customizado para a "Regra de Ouro".
   dio.interceptors.add(RoundingInterceptor());
+  dio.interceptors.add(AuthInterceptor());
 
   return dio;
 });

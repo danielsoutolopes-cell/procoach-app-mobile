@@ -29,4 +29,9 @@ class AthleteService {
     // Faz a chamada HTTP atualizando o valor. Adapte a rota '/gels' consoante o seu backend Node.js.
     await _dio.patch('/athletes/$athleteId/gels', data: {'gel_inventory': newAmount});
   }
+
+  /// Cadastra uma nova prova e define se é a âncora do Macrociclo
+  Future<void> addRace(String athleteId, Map<String, dynamic> raceData) async {
+    await _dio.post('/athletes/$athleteId/races', data: raceData);
+  }
 }

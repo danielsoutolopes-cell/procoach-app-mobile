@@ -7,6 +7,9 @@ import 'package:procoach_os/features/dashboard/widgets/spotify_card.dart';
 import 'package:procoach_os/features/dashboard/widgets/race_day_card.dart';
 import 'package:procoach_os/shared/models/athlete.dart';
 import 'package:procoach_os/shared/widgets/async_value_widget.dart';
+import 'package:procoach_os/core/providers/location_provider.dart';
+import 'package:procoach_os/features/dashboard/providers/weather_provider.dart';
+import 'package:procoach_os/features/dashboard/providers/workout_provider.dart';
 
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
@@ -64,7 +67,12 @@ class DashboardScreen extends ConsumerWidget {
           }
 
           return RefreshIndicator(
-            onRefresh: () => ref.refresh(athleteProvider.future),
+            onRefresh: () async {
+              ref.invalidate(locationProvider); // Força a buscar o GPS nativo novamente
+              ref.invalidate(weatherProvider);  // Limpa o cache do Clima
+              ref.invalidate(workoutProvider);  // Limpa o cache do Treino do Dia
+              await ref.refresh(athleteProvider.future); // Aguarda o perfil recarregar
+            },
             child: ListView(
               padding: const EdgeInsets.all(16.0),
               children: [

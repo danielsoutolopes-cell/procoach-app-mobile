@@ -14,6 +14,11 @@ class WorkoutCard extends ConsumerWidget {
     
     // Valida o estado atual do treino para mudar o botão!
     final isCompleted = workout?.status == 'concluido'; 
+    
+    // Lógica da Esteira Inteligente (Alerta de Chuva e Km/h)
+    final isTreadmill = workout?.suggestTreadmill == true;
+    final paceOrSpeed = isTreadmill && workout?.treadmillSpeed != null ? '🏃 Esteira: ${workout!.treadmillSpeed}' : '🎯 Pace: ${workout?.targetPace ?? "--:--"}';
+    final rainWarning = isTreadmill ? '  •  🌧️ Chuva: ${workout?.rainProbability}%' : '';
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -40,7 +45,7 @@ class WorkoutCard extends ConsumerWidget {
                   children: [
                     Text(workout?.activity.toUpperCase() ?? 'TREINO', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 4),
-                    Text('🎯 Pace: ${workout?.targetPace ?? "--:--"}  •  📏 ${workout?.distanceKm ?? 0}km', style: const TextStyle(color: Colors.grey, fontSize: 14)),
+                    Text('$paceOrSpeed  •  📏 ${workout?.distanceKm ?? 0}km$rainWarning', style: const TextStyle(color: Colors.grey, fontSize: 14)),
                   ],
                 ),
               ),

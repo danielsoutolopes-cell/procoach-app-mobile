@@ -44,6 +44,18 @@ import {
   ensureAthletesRacesColumn
 } from "./migrations";
 
+function mapOpenWeatherToWMO(id: number): number {
+  if (id === 800) return 0;
+  if (id === 801 || id === 802) return 2;
+  if (id === 803 || id === 804) return 3;
+  if (id >= 200 && id < 300) return 95;
+  if (id >= 300 && id < 400) return 51;
+  if (id >= 500 && id < 600) return 63;
+  if (id >= 600 && id < 700) return 71;
+  if (id >= 700 && id < 800) return 45;
+  return 0;
+}
+
 const router: IRouter = Router();
 
 const pdfUpload = multer({
@@ -999,19 +1011,21 @@ router.post("/procoach/me/plan/import-json", async (req: Request, res: Response)
   });
 });
 
-async function getRainProbability(dateISO: string): Promise<number> {
+async function getRainProbability(dateISO: string, lat = -23.6087, lon = -46.6676): Promise<number> {
+  const apiKey = process.env.OPENWEATHER_API_KEY;
+  if (!apiKey) return 0;
   try {
-    const HOME_LAT = -23.6087;
-    const HOME_LON = -46.6676;
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${HOME_LAT}&longitude=${HOME_LON}&daily=precipitation_probability_max&timezone=America%2FSao_Paulo`;
+    const url = `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric`;
     const r = await fetch(url);
     if (!r.ok) return 0;
     const data = await r.json() as any;
-    const idx = data.daily?.time?.findIndex((t: string) => t === dateISO);
-    if (idx !== undefined && idx >= 0) {
-      return Number(data.daily.precipitation_probability_max[idx]) || 0;
+    let pop = 0;
+    for (const item of data.list || []) {
+      if (item.dt_txt.startsWith(dateISO)) {
+        pop = Math.max(pop, item.pop);
+      }
     }
-    return 0;
+    return Math.round(pop * 100);
   } catch {
     return 0;
   }
@@ -1050,7 +1064,9 @@ router.get("/procoach/me/plan/today", async (req: Request, res: Response) => {
   let session = rows.rows[0] ? { ...rows.rows[0] } : null;
 
   if (session) {
-    const rainProb = await getRainProbability(date);
+    const lat = req.query.lat ? Number(req.query.lat) : -23.6087;
+    const lon = req.query.lon ? Number(req.query.lon) : -46.6676;
+    const rainProb = await getRainProbability(date, lat, lon);
     const suggestTreadmill = rainProb > 70;
     Object.assign(session, { suggestTreadmill, rainProbability: rainProb });
     if (suggestTreadmill && session.treadmill_speed) {
@@ -2057,7 +2073,9 @@ router.get("/procoach/athletes/:deviceId/plan/today", async (req: Request, res: 
   let session = rows.rows[0] ? { ...rows.rows[0] } : null;
 
   if (session) {
-    const rainProb = await getRainProbability(date);
+    const lat = req.query.lat ? Number(req.query.lat) : -23.6087;
+    const lon = req.query.lon ? Number(req.query.lon) : -46.6676;
+    const rainProb = await getRainProbability(date, lat, lon);
     const suggestTreadmill = rainProb > 70;
     Object.assign(session, { suggestTreadmill, rainProbability: rainProb });
     if (suggestTreadmill && session.treadmill_speed) {
@@ -2433,16 +2451,53 @@ router.post("/procoach/athletes/:deviceId/gel-usage", async (req: Request, res: 
 
 router.get("/procoach/weather", async (req: Request, res: Response) => {
   try {
-    const HOME_LAT = -23.6087;
-    const HOME_LON = -46.6676;
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${HOME_LAT}&longitude=${HOME_LON}&current=temperature_2m,weathercode,windspeed_10m,precipitation,is_day&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=America%2FSao_Paulo`;
-    const r = await fetch(url);
-    if (!r.ok) {
+    const apiKey = process.env.OPENWEATHER_API_KEY;
+    if (!apiKey) {
+      res.status(500).json({ error: "OPENWEATHER_API_KEY não configurada no .env" });
+      return;
+    }
+
+    const lat = req.query.lat ? Number(req.query.lat) : -23.6087;
+    const lon = req.query.lon ? Number(req.query.lon) : -46.6676;
+
+    const currentUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric`;
+    const forecastUrl = `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric`;
+
+    const [currRes, foreRes] = await Promise.all([fetch(currentUrl), fetch(forecastUrl)]);
+    
+    if (!currRes.ok || !foreRes.ok) {
       res.status(502).json({ error: "Weather API error" });
       return;
     }
-    const data = await r.json();
-    res.json(data);
+    
+    const currData = await currRes.json() as any;
+    const foreData = await foreRes.json() as any;
+
+    const todayISO = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+    let min = currData.main?.temp_min ?? 999;
+    let max = currData.main?.temp_max ?? -999;
+    let pop = 0;
+
+    for (const item of foreData.list || []) {
+      if (item.dt_txt.startsWith(todayISO)) {
+        min = Math.min(min, item.main.temp_min);
+        max = Math.max(max, item.main.temp_max);
+        pop = Math.max(pop, item.pop);
+      }
+    }
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    const isDay = nowSec >= currData.sys?.sunrise && nowSec <= currData.sys?.sunset ? 1 : 0;
+
+    res.json({
+      temperature: currData.main?.temp ? Math.round(currData.main.temp) : null,
+      weathercode: mapOpenWeatherToWMO(currData.weather?.[0]?.id || 800),
+      windspeed: currData.wind?.speed ? Math.round(currData.wind.speed * 3.6) : null,
+      is_day: isDay,
+      min: min !== 999 ? Math.round(min) : null,
+      max: max !== -999 ? Math.round(max) : null,
+      rainProbability: Math.round(pop * 100)
+    });
   } catch (err) {
     console.error("Erro ao buscar clima:", err);
     res.status(500).json({ error: "Internal Server Error" });

@@ -23,6 +23,15 @@ class Workout {
   @JsonKey(name: 'shoe_id')
   final String? shoeId;
 
+  @JsonKey(name: 'treadmill_speed')
+  final String? treadmillSpeed;
+  
+  @JsonKey(name: 'suggest_treadmill')
+  final bool? suggestTreadmill;
+  
+  @JsonKey(name: 'rain_probability')
+  final int? rainProbability;
+
   Workout({
     required this.id,
     required this.date,
@@ -32,6 +41,9 @@ class Workout {
     this.estrutura,
     this.status = WorkoutStatus.open,
     this.shoeId,
+    this.treadmillSpeed,
+    this.suggestTreadmill,
+    this.rainProbability,
   });
 
   factory Workout.fromJson(Map<String, dynamic> json) => _$WorkoutFromJson(json);

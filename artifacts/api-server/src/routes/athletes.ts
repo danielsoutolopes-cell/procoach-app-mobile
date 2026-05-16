@@ -8,6 +8,58 @@ import { getOrCreateMonoAthleteId } from './migrations';
 
 export const athletesRouter = Router();
 
+function mapOpenWeatherToWMO(id: number): number {
+  if (id === 800) return 0;
+  if (id === 801 || id === 802) return 2;
+  if (id === 803 || id === 804) return 3;
+  if (id >= 200 && id < 300) return 95;
+  if (id >= 300 && id < 400) return 51;
+  if (id >= 500 && id < 600) return 63;
+  if (id >= 600 && id < 700) return 71;
+  if (id >= 700 && id < 800) return 45;
+  return 0;
+}
+
+async function getWeatherForDate(dateISO: string, lat = -23.6087, lon = -46.6676) {
+  const apiKey = process.env.OPENWEATHER_API_KEY;
+  if (!apiKey) return null;
+  try {
+    const url = `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric`;
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    const data = await r.json() as any;
+    
+    let min = 999;
+    let max = -999;
+    let pop = 0;
+    let weathercode = 0;
+    let found = false;
+
+    for (const item of data.list || []) {
+      const itemDate = item.dt_txt.split(' ')[0];
+      if (itemDate === dateISO) {
+        found = true;
+        min = Math.min(min, item.main.temp_min);
+        max = Math.max(max, item.main.temp_max);
+        pop = Math.max(pop, item.pop);
+        weathercode = item.weather[0].id;
+      }
+    }
+    
+    if (found) {
+      return {
+        rain_probability: Math.round(pop * 100),
+        min: Math.round(min),
+        max: Math.round(max),
+        weathercode: mapOpenWeatherToWMO(weathercode)
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // Configura o multer para salvar temporariamente os uploads na pasta 'uploads/'
 const upload = multer({ dest: 'uploads/' });
 
@@ -52,7 +104,10 @@ athletesRouter.post(['/me/race-strategy', '/:deviceId/race-strategy'], async (re
   try {
     const { raceName } = req.body;
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
-    const model = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL || "gemini-2.5-flash" });
+    const model = genAI.getGenerativeModel(
+      { model: process.env.GEMINI_MODEL || "gemini-1.5-flash" },
+      { apiVersion: "v1" }
+    );
 
     const prompt = `Você é um treinador de corrida de elite. Seu atleta vai correr a prova "${raceName}" muito em breve.
 Crie uma estratégia de prova curta e tática.
@@ -107,7 +162,7 @@ athletesRouter.get(['/me/workouts/today', '/:deviceId/workouts/today'], async (r
     const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
     
     const rows = await db.execute(sql`
-      SELECT session_date, activity, pace_target, structure, planned_km
+      SELECT session_date, activity, pace_target, treadmill_speed, structure, planned_km
       FROM procoach_plan_sessions
       WHERE athlete_id = ${id} AND session_date = ${today}
       LIMIT 1
@@ -119,11 +174,23 @@ athletesRouter.get(['/me/workouts/today', '/:deviceId/workouts/today'], async (r
       return;
     }
 
+    const lat = req.query.lat ? Number(req.query.lat) : -23.6087;
+    const lon = req.query.lon ? Number(req.query.lon) : -46.6676;
+    const weather = await getWeatherForDate(s.session_date, lat, lon);
+    const rainProb = weather?.rain_probability ?? 0;
+    const suggestTreadmill = rainProb > 70;
+
     res.json({
       id: s.session_date,
       date: s.session_date,
       activity: s.activity,
       pace_alvo: s.pace_target,
+      treadmill_speed: s.treadmill_speed,
+      suggest_treadmill: suggestTreadmill,
+      rain_probability: rainProb,
+      weather_min: weather?.min,
+      weather_max: weather?.max,
+      weather_code: weather?.weathercode,
       distancia_km: s.planned_km,
       estrutura: s.structure,
       status: 'open',
@@ -197,7 +264,10 @@ athletesRouter.post(['/me/bioimpedance/upload', '/:deviceId/bioimpedance/upload'
     const base64Data = fileBytes.toString('base64');
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
-    const model = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL || "gemini-2.5-flash" });
+    const model = genAI.getGenerativeModel(
+      { model: process.env.GEMINI_MODEL || "gemini-1.5-flash" },
+      { apiVersion: "v1" }
+    );
 
     const prompt = `Você é um especialista em nutrição e leitura de exames.
 Analise o PDF de bioimpedância em anexo e extraia exatamente as seguintes métricas num JSON válido:
@@ -324,7 +394,7 @@ athletesRouter.get(['/me/workouts/next', '/:deviceId/workouts/next'], async (req
     const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
 
     const rows = await db.execute(sql`
-      SELECT session_date, activity, pace_target, structure, planned_km
+      SELECT session_date, activity, pace_target, treadmill_speed, structure, planned_km
       FROM procoach_plan_sessions
       WHERE athlete_id = ${id} AND session_date > ${today}
       ORDER BY session_date ASC
@@ -337,11 +407,23 @@ athletesRouter.get(['/me/workouts/next', '/:deviceId/workouts/next'], async (req
       return;
     }
 
+    const lat = req.query.lat ? Number(req.query.lat) : -23.6087;
+    const lon = req.query.lon ? Number(req.query.lon) : -46.6676;
+    const weather = await getWeatherForDate(s.session_date, lat, lon);
+    const rainProb = weather?.rain_probability ?? 0;
+    const suggestTreadmill = rainProb > 70;
+
     res.json({
       id: s.session_date,
       date: s.session_date,
       activity: s.activity,
       pace_alvo: s.pace_target,
+      treadmill_speed: s.treadmill_speed,
+      suggest_treadmill: suggestTreadmill,
+      rain_probability: rainProb,
+      weather_min: weather?.min,
+      weather_max: weather?.max,
+      weather_code: weather?.weathercode,
       distancia_km: s.planned_km,
       estrutura: s.structure,
       status: 'open',

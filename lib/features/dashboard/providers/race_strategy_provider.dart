@@ -21,8 +21,8 @@ class RaceStrategyNotifier extends AsyncNotifier<String?> {
     try {
       final dio = ref.read(dioProvider);
       
-      // Chamada real para o backend Node.js
-      final response = await dio.post('/ai/race-strategy', data: {'race_name': raceName});
+      // Chamada para a rota oficial do atleta no backend Node.js
+      final response = await dio.post('/athletes/me/race-strategy', data: {'raceName': raceName});
       state = AsyncValue.data(response.data['strategy']);
       
     } catch (e, stackTrace) {

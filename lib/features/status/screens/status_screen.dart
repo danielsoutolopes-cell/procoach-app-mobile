@@ -8,6 +8,8 @@ import 'package:procoach_os/features/status/providers/bioimpedance_provider.dart
 import 'package:procoach_os/features/status/providers/compliance_provider.dart';
 import 'package:procoach_os/features/status/providers/strength_provider.dart';
 import 'package:procoach_os/shared/models/strength_routine.dart';
+import 'package:procoach_os/features/status/widgets/weekly_volume_chart.dart';
+import 'package:procoach_os/features/status/providers/bioimpedance_history_provider.dart';
 
 class StatusScreen extends ConsumerWidget {
   const StatusScreen({super.key});
@@ -31,14 +33,17 @@ class StatusScreen extends ConsumerWidget {
           // Recarrega todos os dados da tela ao puxar para baixo
           ref.invalidate(complianceProvider);
           ref.invalidate(bioimpedanceProvider);
+          ref.invalidate(bioHistoryProvider);
           ref.invalidate(strengthRoutinesProvider);
         },
         child: ListView(
           padding: const EdgeInsets.all(16.0),
           children: [
-            _buildComplianceChart(context, ref),
+            const WeeklyVolumeChart(),
             const SizedBox(height: 24),
             _buildBioimpedanceCard(context, ref),
+            const SizedBox(height: 24),
+            _buildBioHistoryChart(context, ref),
             const SizedBox(height: 24),
             const StrengthLibraryWidget(),
           ],
@@ -47,8 +52,8 @@ class StatusScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildComplianceChart(BuildContext context, WidgetRef ref) {
-    final complianceAsync = ref.watch(complianceProvider);
+  Widget _buildBioHistoryChart(BuildContext context, WidgetRef ref) {
+    final historyAsync = ref.watch(bioHistoryProvider);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -61,97 +66,108 @@ class StatusScreen extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'COMPLIANCE DA SEMANA (KM)',
+            'PROGRESSÃO DE PESO E GORDURA',
             style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.2),
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: 24),
           SizedBox(
             height: 200,
-            child: complianceAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (error, _) => const Center(child: Text('Erro ao carregar gráfico', style: TextStyle(color: Colors.redAccent))),
+            child: historyAsync.when(
+              loading: () => const Center(child: CircularProgressIndicator(color: Colors.deepOrangeAccent)),
+              error: (err, _) => const Center(child: Text('Erro ao carregar gráfico.', style: TextStyle(color: Colors.redAccent))),
               data: (data) {
-                double maxY = 16;
-                for (var d in data) {
-                  if (d.plannedKm > maxY) maxY = d.plannedKm.toDouble();
-                  if (d.completedKm > maxY) maxY = d.completedKm.toDouble();
+                if (data.isEmpty || data.length < 2) {
+                  return const Center(child: Text('Necessário 2+ registros para o gráfico.', style: TextStyle(color: Colors.white54)));
                 }
-                maxY += 4; // Folga visual no topo do gráfico
+
+                final barGroups = data.asMap().entries.map((entry) {
+                  final index = entry.key;
+                  final item = entry.value;
+                  final weight = (item['weight_kg'] as num?)?.toDouble() ?? 0;
+                  final fat = (item['body_fat_pct'] as num?)?.toDouble() ?? 0;
+
+                  return BarChartGroupData(
+                    x: index,
+                    barsSpace: 4,
+                    barRods: [
+                      BarChartRodData(toY: weight, color: Colors.deepOrangeAccent, width: 8, borderRadius: BorderRadius.circular(4)),
+                      BarChartRodData(toY: fat, color: Colors.redAccent.withOpacity(0.8), width: 8, borderRadius: BorderRadius.circular(4)),
+                    ],
+                  );
+                }).toList();
+
+                double maxY = 0;
+                for (var item in data) {
+                  final w = (item['weight_kg'] as num?)?.toDouble() ?? 0;
+                  if (w > maxY) maxY = w;
+                }
 
                 return BarChart(
                   BarChartData(
-                    alignment: BarChartAlignment.spaceAround,
-                    maxY: maxY,
-                    barTouchData: BarTouchData(enabled: false),
-                    titlesData: FlTitlesData(
+                    maxY: maxY + 10,
+                    barTouchData: BarTouchData(
+                      touchTooltipData: BarTouchTooltipData(
+                        getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                          final item = data[group.x.toInt()];
+                          final isWeight = rodIndex == 0;
+                          final val = isWeight ? item['weight_kg'] : item['body_fat_pct'];
+                          final label = isWeight ? 'kg' : '% Gordura';
+                          return BarTooltipItem('$val $label', const TextStyle(color: Colors.white, fontWeight: FontWeight.bold));
+                        },
+                      ),
+                    ),
+                    gridData: FlGridData(
                       show: true,
+                      drawVerticalLine: false,
+                      horizontalInterval: 20,
+                      getDrawingHorizontalLine: (value) => const FlLine(color: Colors.white10, strokeWidth: 1),
+                    ),
+                    borderData: FlBorderData(show: false),
+                    titlesData: FlTitlesData(
+                      rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                      topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                      leftTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          reservedSize: 30,
+                          getTitlesWidget: (value, meta) => Text(value.toInt().toString(), style: const TextStyle(color: Colors.grey, fontSize: 10)),
+                        ),
+                      ),
                       bottomTitles: AxisTitles(
                         sideTitles: SideTitles(
                           showTitles: true,
                           getTitlesWidget: (value, meta) {
-                            const days = ['S', 'T', 'Q', 'Q', 'S', 'S', 'D'];
-                            if (value.toInt() >= 0 && value.toInt() < days.length) {
-                              return Padding(
-                                padding: const EdgeInsets.only(top: 8.0),
-                                child: Text(
-                                  days[value.toInt()],
-                                  style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 12),
-                                ),
-                              );
+                            final index = value.toInt();
+                            if (index >= 0 && index < data.length) {
+                              final dateStr = data[index]['entry_date'].toString();
+                              final parts = dateStr.split('-');
+                              if (parts.length >= 3) return Padding(padding: const EdgeInsets.only(top: 8.0), child: Text('${parts[2]}/${parts[1]}', style: const TextStyle(color: Colors.grey, fontSize: 10)));
                             }
                             return const SizedBox.shrink();
                           },
                         ),
                       ),
-                      leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                      topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                      rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                     ),
-                    gridData: FlGridData(
-                      show: true,
-                      drawVerticalLine: false,
-                      horizontalInterval: 5,
-                      getDrawingHorizontalLine: (value) => const FlLine(
-                        color: Colors.white10,
-                        strokeWidth: 1,
-                        dashArray: [4, 4],
-                      ),
-                    ),
-                    borderData: FlBorderData(show: false),
-                    barGroups: data.map((d) {
-                      return _makeBarData(d.dayIndex, d.completedKm.toDouble(), d.plannedKm.toDouble());
-                    }).toList(),
                   ),
                 );
               },
             ),
           ),
+          const SizedBox(height: 16),
+          const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.square, color: Colors.deepOrangeAccent, size: 12),
+              SizedBox(width: 4),
+              Text('Peso (kg)', style: TextStyle(color: Colors.white70, fontSize: 12)),
+              SizedBox(width: 16),
+              Icon(Icons.square, color: Colors.redAccent, size: 12),
+              SizedBox(width: 4),
+              Text('Gordura (%)', style: TextStyle(color: Colors.white70, fontSize: 12)),
+            ],
+          )
         ],
       ),
-    );
-  }
-
-  BarChartGroupData _makeBarData(int x, double completed, double target) {
-    // Se foi planeado um descanso e completado 0, mostra um pequeno traço cinza.
-    final isRestDay = completed == 0 && target == 0;
-    // Se completou 0, mas tinha target, sinalizamos em vermelho opaco (Falta)
-    final isMissed = completed == 0 && target > 0;
-
-    return BarChartGroupData(
-      x: x,
-      barRods: [
-        BarChartRodData(
-          toY: isRestDay ? 0.2 : (isMissed ? target : completed),
-          color: isRestDay ? Colors.grey[800] : (isMissed ? Colors.redAccent.withOpacity(0.5) : Colors.deepOrangeAccent),
-          width: 16,
-          borderRadius: BorderRadius.circular(4),
-          backDrawRodData: BackgroundBarChartRodData(
-            show: target > 0, // Mostra a barra cinza de fundo (o Alvo)
-            toY: target,
-            color: Colors.grey[850],
-          ),
-        ),
-      ],
     );
   }
 

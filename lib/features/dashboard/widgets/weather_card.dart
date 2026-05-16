@@ -7,10 +7,23 @@ class WeatherCard extends ConsumerWidget {
 
   const WeatherCard({super.key, this.targetDate});
 
+  String _getWeatherEmoji(int? code, int? isDay) {
+    if (code == null) return '☁️';
+    if (code == 0) return isDay == 1 ? '☀️' : '🌙';
+    if (code == 1 || code == 2 || code == 3) return isDay == 1 ? '⛅' : '☁️';
+    if (code >= 45 && code <= 48) return '🌫️';
+    if (code >= 51 && code <= 67) return '🌧️';
+    if (code >= 71 && code <= 77) return '❄️';
+    if (code >= 80 && code <= 82) return '🌧️';
+    if (code >= 85 && code <= 86) return '❄️';
+    if (code >= 95) return '⛈️';
+    return '☁️';
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Agora passamos a data ('targetDate') para o Provider (o "Family" precisa deste argumento!)
-    final weatherAsync = ref.watch(weatherProvider(targetDate));
+    // O novo provider usa o GPS, então não passamos mais o targetDate aqui
+    final weatherAsync = ref.watch(weatherProvider);
     
     final title = targetDate != null ? 'PREVISÃO PARA O TREINO' : 'PREVISÃO DE HOJE';
 
@@ -26,22 +39,31 @@ class WeatherCard extends ConsumerWidget {
         children: [
           Text(
             title,
-            style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+            style: const TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.2),
           ),
           const SizedBox(height: 16),
           weatherAsync.when(
-            loading: () => const Center(child: CircularProgressIndicator()),
+            loading: () => const Center(child: CircularProgressIndicator(color: Colors.deepOrangeAccent)),
             error: (error, _) => const Text(
               'Não foi possível carregar a previsão.',
               style: TextStyle(color: Colors.redAccent),
             ),
             data: (weather) {
+              if (weather == null) {
+                return const Text('Sem dados de clima', style: TextStyle(color: Colors.white54));
+              }
+
+              final emoji = _getWeatherEmoji(weather['weathercode'] as int?, weather['is_day'] as int?);
+              final temp = weather['temperature']?.toString() ?? '--';
+              final rainProb = weather['rainProbability']?.toString() ?? '0';
+              final wind = weather['windspeed']?.toString() ?? '--';
+
               return Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  _buildWeatherItem(weather.emoji, '${weather.temperature}°C', 'Temp'),
-                  _buildWeatherItem('💧', '${weather.precipitation}%', 'Chuva'),
-                  _buildWeatherItem('💨', '${weather.windspeed} km/h', 'Vento'),
+                  _buildWeatherItem(emoji, '$temp°C', 'Temp'),
+                  _buildWeatherItem('💧', '$rainProb%', 'Chuva'),
+                  _buildWeatherItem('💨', '$wind km/h', 'Vento'),
                 ],
               );
             },

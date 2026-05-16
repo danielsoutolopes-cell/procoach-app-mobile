@@ -25,4 +25,37 @@ class WorkoutService {
       rethrow;
     }
   }
+
+  /// Envia o debrief do treino e atualiza a quilometragem do tênis se necessário
+  Future<void> submitDebrief({
+    required String workoutId,
+    required int rpe,
+    required int painLevel,
+    String? shoeId,
+    double? distanceKm,
+  }) async {
+    try {
+      await _dio.post(
+        '/athletes/me/workouts/$workoutId/debrief',
+        data: {
+          'rpe': rpe,
+          'pain_level': painLevel,
+          if (shoeId != null) 'shoe_id': shoeId,
+          if (distanceKm != null) 'distance_km': distanceKm,
+        },
+      );
+    } catch (e) {
+      throw Exception('Erro ao salvar o debrief do treino: $e');
+    }
+  }
+
+  /// Sincroniza atividades do Strava e retorna o resultado.
+  Future<Map<String, dynamic>> syncStrava() async {
+    try {
+      final response = await _dio.post('/strava/sync');
+      return response.data as Map<String, dynamic>;
+    } catch (e) {
+      throw Exception('Erro ao sincronizar com o Strava: $e');
+    }
+  }
 }

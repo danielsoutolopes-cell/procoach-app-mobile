@@ -63,25 +63,36 @@ class WorkoutCard extends ConsumerWidget {
                 Color bgColor;
                 Color textColor;
                 Color borderColor;
+                IconData segmentIcon;
                 
                 if (isWarmup) {
                   bgColor = Colors.blueAccent.withOpacity(0.15);
                   textColor = Colors.lightBlueAccent;
                   borderColor = Colors.blueAccent.withOpacity(0.5);
+                  segmentIcon = Icons.arrow_upward_rounded;
                 } else if (isCooldown) {
                   bgColor = Colors.teal.withOpacity(0.15);
                   textColor = Colors.tealAccent;
                   borderColor = Colors.teal.withOpacity(0.5);
+                  segmentIcon = Icons.arrow_downward_rounded;
                 } else {
                   bgColor = Colors.deepOrangeAccent.withOpacity(0.15);
                   textColor = Colors.deepOrangeAccent;
                   borderColor = Colors.deepOrangeAccent.withOpacity(0.5);
+                  segmentIcon = Icons.local_fire_department_rounded;
                 }
 
                 return Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(8), border: Border.all(color: borderColor)),
-                  child: Text(text, style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 13)),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(segmentIcon, color: textColor, size: 14),
+                      const SizedBox(width: 6),
+                      Text(text, style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 13)),
+                    ],
+                  ),
                 );
               }).toList(),
             ),

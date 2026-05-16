@@ -42,9 +42,11 @@ const { default: app } = await import("./app");
 const { logger } = await import("./lib/logger");
 const { stravaWebhookRouter } = await import("./routes/stravaWebhook");
 const { default: aiRoutes } = await import("./routes/ai.js");
+const { equipmentRouter } = await import("./routes/equipment.js");
 
 app.use('/api', stravaWebhookRouter);
 app.use('/api', aiRoutes);
+app.use('/api/procoach', equipmentRouter);
 
 const rawPort = process.env["PORT"] || "3000";
 

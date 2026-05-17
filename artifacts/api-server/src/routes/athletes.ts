@@ -107,7 +107,6 @@ athletesRouter.post(['/me/race-strategy', '/:deviceId/race-strategy'], async (re
     const model = genAI.getGenerativeModel(
       { model: process.env.GEMINI_MODEL || "gemini-1.5-flash" },
       { apiVersion: "v1beta" }
-      { apiVersion: "v1beta" }
     );
 
     const prompt = `Você é um treinador de corrida de elite. Seu atleta vai correr a prova "${raceName}" muito em breve.

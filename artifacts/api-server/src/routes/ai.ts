@@ -16,12 +16,8 @@ router.post("/ai/race-strategy", async (req: Request, res: Response) => {
     }
 
     // Usa o modelo mais rápido e eficiente para tarefas de texto diretas.
-    // Forçamos a apiVersion para 'v1' para resolver o erro 404 do endpoint v1beta.
-    const modelName = (process.env.GEMINI_MODEL || "gemini-1.5-flash-latest").replace(/^['"`]+|['"`]+$/g, "").trim();
-    const model = genAI.getGenerativeModel(
-      { model: modelName },
-      { apiVersion: "v1beta" }
-    );
+    const modelName = (process.env.GEMINI_MODEL || "gemini-pro").replace(/^['"`]+|['"`]+$/g, "").trim();
+    const model = genAI.getGenerativeModel({ model: modelName });
     
     const prompt = `Você é um treinador de corrida de elite do aplicativo ProCoach OS. Crie uma estratégia de prova direta, motivadora e em bullet points para a seguinte corrida: ${race_name}. Foco em pace, hidratação, nutrição e mentalidade. Mantenha curto e grosso (máximo de 4 tópicos breves).`;
 

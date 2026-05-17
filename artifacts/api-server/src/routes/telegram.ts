@@ -226,8 +226,8 @@ async function classifyIntent(text: string): Promise<string> {
 
   try {
     const genAI = new GoogleGenerativeAI(key);
-    const modelName = (process.env.GEMINI_MODEL || "gemini-1.5-flash-latest").replace(/^['"`]+|['"`]+$/g, "").trim();
-    const model = genAI.getGenerativeModel({ model: modelName }, { apiVersion: "v1beta" });
+    const modelName = (process.env.GEMINI_MODEL || "gemini-pro").replace(/^['"`]+|['"`]+$/g, "").trim();
+    const model = genAI.getGenerativeModel({ model: modelName });
     const prompt = `Classifica a mensagem do utilizador em UMA dessas categorias: MENU | CONSULTA | FIM | LARGADA | CHEGADA | BIOMETRIA | TELEMETRIA | PLANOHOJE | COMPLIANCE | UNKNOWN. Responde APENAS com a categoria em maiúsculas, sem explicação.\n\nMensagem do usuário: "${text}"`;
     const result = await model.generateContent(prompt);
     return result.response.text().trim().toUpperCase();

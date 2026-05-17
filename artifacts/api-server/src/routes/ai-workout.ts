@@ -104,8 +104,8 @@ async function generateWithGemini(params: {
     throw new Error("GEMINI_API_KEY is not set");
   }
 
-  const model = (process.env.GEMINI_MODEL || "gemini-1.5-flash-latest").replace(/^['"`]+|['"`]+$/g, "").trim();
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+  const model = (process.env.GEMINI_MODEL || "gemini-pro").replace(/^['"`]+|['"`]+$/g, "").trim();
+  const endpoint = `https://generativelanguage.googleapis.com/v1/models/${encodeURIComponent(
     model,
   )}:generateContent?key=${encodeURIComponent(apiKey)}`;
 

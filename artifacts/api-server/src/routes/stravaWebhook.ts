@@ -103,8 +103,8 @@ async function generateWithGemini(prompt: string): Promise<string> {
 
   try {
     const genAI = new GoogleGenerativeAI(apiKey);
-    const modelName = (process.env.GEMINI_MODEL || "gemini-1.5-flash-latest").replace(/^['"`]+|['"`]+$/g, "").trim();
-    const model = genAI.getGenerativeModel({ model: modelName }, { apiVersion: "v1beta" });
+    const modelName = (process.env.GEMINI_MODEL || "gemini-pro").replace(/^['"`]+|['"`]+$/g, "").trim();
+    const model = genAI.getGenerativeModel({ model: modelName });
     const result = await model.generateContent(prompt);
     return result.response.text();
   } catch (err: any) {

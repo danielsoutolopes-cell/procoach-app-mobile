@@ -17,7 +17,7 @@ router.post("/ai/race-strategy", async (req: Request, res: Response) => {
 
     // Usa o modelo mais rápido e eficiente para tarefas de texto diretas.
     // Forçamos a apiVersion para 'v1' para resolver o erro 404 do endpoint v1beta.
-    const modelName = (process.env.GEMINI_MODEL || "gemini-1.5-flash").replace(/^['"`]+|['"`]+$/g, "").trim();
+    const modelName = (process.env.GEMINI_MODEL || "gemini-1.5-flash-latest").replace(/^['"`]+|['"`]+$/g, "").trim();
     const model = genAI.getGenerativeModel(
       { model: modelName },
       { apiVersion: "v1beta" }

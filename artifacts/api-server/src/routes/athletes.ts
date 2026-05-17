@@ -104,7 +104,7 @@ athletesRouter.post(['/me/race-strategy', '/:deviceId/race-strategy'], async (re
   try {
     const { raceName } = req.body;
     const apiKey = (process.env.GEMINI_API_KEY || "").replace(/^['"`]+|['"`]+$/g, "").trim();
-    const modelName = (process.env.GEMINI_MODEL || "gemini-1.5-flash").replace(/^['"`]+|['"`]+$/g, "").trim();
+    const modelName = (process.env.GEMINI_MODEL || "gemini-1.5-flash-latest").replace(/^['"`]+|['"`]+$/g, "").trim();
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel(
       { model: modelName },
@@ -266,7 +266,7 @@ athletesRouter.post(['/me/bioimpedance/upload', '/:deviceId/bioimpedance/upload'
     const base64Data = fileBytes.toString('base64');
 
     const apiKey = (process.env.GEMINI_API_KEY || "").replace(/^['"`]+|['"`]+$/g, "").trim();
-    const modelName = (process.env.GEMINI_MODEL || "gemini-1.5-flash").replace(/^['"`]+|['"`]+$/g, "").trim();
+    const modelName = (process.env.GEMINI_MODEL || "gemini-1.5-flash-latest").replace(/^['"`]+|['"`]+$/g, "").trim();
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel(
       { model: modelName },

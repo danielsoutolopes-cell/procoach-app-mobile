@@ -43,10 +43,12 @@ class DashboardScreen extends ConsumerWidget {
       body: AsyncValueWidget<Athlete>(
         value: athleteAsync,
         data: (athlete) {
-          // Calcula os dias para a prova âncora
+          // Encontra dinamicamente a prova âncora usando o novo ID do macrociclo (ou fallback)
           var anchorRace;
           try {
-            anchorRace = athlete.races.where((r) => r.isAnchor).firstOrNull;
+            anchorRace = athlete.races.where((r) => 
+              (athlete.macrocycleRaceId != null && r.id == athlete.macrocycleRaceId) || r.isAnchor
+            ).firstOrNull;
           } catch (e) {
             anchorRace = null;
           }
@@ -60,11 +62,14 @@ class DashboardScreen extends ConsumerWidget {
           
           // Calcula a semana atual do Macrociclo (1 a 16)
           int currentWeek = 0;
+          int weeksLeft = 0;
           if (anchorRace != null) {
             final planStart = anchorRace.date.subtract(const Duration(days: 16 * 7));
             final daysSinceStart = now.difference(planStart).inDays;
             currentWeek = (daysSinceStart ~/ 7) + 1;
             currentWeek = currentWeek.clamp(1, 16); // Garante que o valor fique entre 1 e 16
+            
+            weeksLeft = daysToRace > 0 ? (daysToRace / 7).ceil() : 0;
           }
 
           return RefreshIndicator(
@@ -92,7 +97,7 @@ class DashboardScreen extends ConsumerWidget {
                       child: Row(
                         children: [
                           Text(
-                            anchorRace != null ? '$daysToRace DIAS P/ PROVA' : 'CADASTRAR PROVA',
+                            anchorRace != null ? '$daysToRace DIAS ($weeksLeft SEMANAS) P/ PROVA' : 'CADASTRAR PROVA',
                             style: const TextStyle(color: Colors.deepOrangeAccent, fontSize: 14, fontWeight: FontWeight.bold),
                           ),
                           const SizedBox(width: 4),

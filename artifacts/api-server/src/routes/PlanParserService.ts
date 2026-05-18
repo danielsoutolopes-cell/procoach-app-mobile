@@ -188,13 +188,22 @@ export function parseSegments(structure: string | null): Array<Record<string, un
     .filter(Boolean)
     .filter((p) => !isStrengthOrBikePart(p));
   return parts.map((p) => {
-    const dist = p.match(/(\d+(?:[.,]\d+)?)\s*km/i)?.[1];
+    const isInterval = /\d+\s*x\s*\d+(?:[.,]\d+)?\s*(m|km)\b/i.test(p);
+    
+    // Se for bloco de intervalo, omitimos a distanceKm isolada
+    // para evitar que a distância do tiro seja contabilizada em duplicado na soma base.
+    let dist: string | undefined;
+    if (!isInterval) {
+      dist = p.match(/(\d+(?:[.,]\d+)?)\s*km/i)?.[1];
+    }
+
     const min = p.match(/(\d+)\s*min/i)?.[1];
     const kmh = p.match(/(\d+(?:[.,]\d+)?)\s*km\/?h/i)?.[1];
     const kind = /(^|\s)AQ(\s|$)/i.test(p) ? "warmup" : /(^|\s)DQ(\s|$)/i.test(p) ? "cooldown" : "main";
     return {
       kind,
       label: p,
+      isInterval,
       distanceKm: dist ? Number(dist.replace(",", ".")) : null,
       durationMin: min ? Number(min) : null,
       treadmillKmh: kmh ? Number(kmh.replace(",", ".")) : null,
@@ -216,6 +225,9 @@ export function groupBlocks(segments: Array<Record<string, unknown>>): {
 export function sumDistanceKm(segments: Array<Record<string, unknown>>, kind?: string): number {
   return segments.reduce((acc, s) => {
     if (kind && s.kind !== kind) return acc;
+    // Pula segmentos de intervalo para não contar duplicado
+    if (s.isInterval) return acc;
+
     const d = typeof s.distanceKm === "number" && Number.isFinite(s.distanceKm) ? s.distanceKm : 0;
     return acc + Math.max(0, d);
   }, 0);

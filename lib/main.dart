@@ -46,8 +46,8 @@ Future<void> _setupPushNotifications(ProviderContainer container) async {
     try {
       // Envia o token para o backend (Neon DB) para substituir o expoPushToken
       final dio = container.read(dioProvider);
-      await dio.patch(
-        '/athletes/me/push-token',
+      await dio.post(
+        '/procoach/me/push-token',
         data: {'token': fcmToken},
       );
       debugPrint('✅ Token FCM salvo no servidor!');

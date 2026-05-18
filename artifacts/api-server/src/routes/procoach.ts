@@ -4,6 +4,7 @@ import { db } from "@workspace/db";
 import multer from "multer";
 import PDFDocument from "pdfkit";
 import pdfParse from "pdf-parse";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import {
   athletesTable,
   shoesTable,
@@ -145,6 +146,13 @@ async function upsertWorkoutFeedback(payload: {
       notes = COALESCE(EXCLUDED.notes, procoach_workout_feedback.notes),
       updated_at = NOW()
   `);
+
+  if (painVal !== null) {
+    // Atualiza o nível de dor no perfil do atleta para integrar com o Radar Articular
+    await db.update(athletesTable)
+      .set({ painLevel: painVal, updatedAt: new Date() })
+      .where(eq(athletesTable.id, payload.athleteId));
+  }
 }
 
 async function sendTelegram(text: string): Promise<void> {
@@ -233,6 +241,174 @@ router.post("/procoach/athletes/sync", async (req: Request, res: Response) => {
   res.json({ athlete: updatedAthlete, pointers });
 });
 
+// ─── Gerenciamento de Provas (Races) ──────────────────────────────────────────
+router.post("/procoach/athletes/:deviceId/races", async (req: Request, res: Response) => {
+  const deviceId = String(req.params.deviceId);
+  const raceData = req.body;
+  
+  await ensureAthletesRacesColumn();
+  const athletes = await db.select().from(athletesTable).where(eq(athletesTable.deviceId, deviceId) as any).limit(1);
+  if (athletes.length === 0) {
+    res.status(404).json({ error: "Athlete not found" });
+    return;
+  }
+  const athlete = athletes[0];
+  const currentRaces = typeof athlete.races === "string" ? JSON.parse(athlete.races) : (athlete.races || []);
+  currentRaces.push(raceData);
+
+  await db.execute(sql`
+    UPDATE procoach_athletes
+    SET races = ${JSON.stringify(currentRaces)}::jsonb, updated_at = NOW()
+    WHERE id = ${athlete.id}
+  `);
+
+  res.json({ success: true, races: currentRaces });
+});
+
+router.put("/procoach/athletes/:deviceId/macrocycle-anchor", async (req: Request, res: Response) => {
+  const deviceId = String(req.params.deviceId);
+  const { raceId } = req.body;
+
+  const athletes = await db.select().from(athletesTable).where(eq(athletesTable.deviceId, deviceId) as any).limit(1);
+  if (athletes.length === 0) {
+    res.status(404).json({ error: "Athlete not found" });
+    return;
+  }
+
+  // Atualiza a âncora do macrociclo que ditará as 16 semanas do atleta
+  await db.execute(sql`
+    UPDATE procoach_athletes
+    SET macrocycle_race_id = ${raceId}, updated_at = NOW()
+    WHERE id = ${athletes[0].id}
+  `);
+
+  res.json({ success: true, macrocycleRaceId: raceId });
+});
+
+// ─── Rota Retrocompatível para Flutter (Legado athletes.ts) ───────────────────
+router.get("/procoach/athletes/:deviceId/profile", async (req: Request, res: Response) => {
+  try {
+    const deviceId = String(req.params.deviceId);
+    await ensureAthletesRacesColumn();
+    await ensureGelTables();
+
+    const athleteRows = await db.execute(sql`SELECT * FROM procoach_athletes WHERE device_id = ${deviceId} LIMIT 1`) as any;
+    const athlete = athleteRows.rows[0];
+    
+    if (!athlete) {
+      res.status(404).json({ error: "Athlete not found" });
+      return;
+    }
+
+    const gelRows = await db.execute(sql`SELECT gels_in_stock FROM procoach_gel_stock WHERE athlete_id = ${athlete.id} LIMIT 1`) as any;
+    const currentGels = gelRows.rows[0] ? Number(gelRows.rows[0].gels_in_stock) : 0;
+
+    let races = [];
+    if (athlete.races) {
+      races = typeof athlete.races === "string" ? JSON.parse(athlete.races) : athlete.races;
+    }
+
+    res.json({
+      id: athlete.id.toString(),
+      name: athlete.name || "CEO",
+      gel_inventory: currentGels,
+      races: races,
+    });
+  } catch (err) {
+    console.error("[API] Erro ao buscar perfil compatível:", err);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// ─── Gemini Race Strategy ─────────────────────────────────────────────────────
+router.post("/procoach/me/race-strategy", async (req: Request, res: Response) => {
+  try {
+    const { raceName } = req.body as { raceName?: string };
+    if (!raceName) {
+      res.status(400).json({ error: "raceName is required" });
+      return;
+    }
+
+    const apiKey = (process.env.GEMINI_API_KEY || "").replace(/^['"`]+|['"`]+$/g, "").trim();
+    const modelName = (process.env.GEMINI_MODEL || "gemini-pro").replace(/^['"`]+|['"`]+$/g, "").trim();
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: modelName });
+
+    const prompt = `Você é um treinador de corrida de elite. Seu atleta vai correr a prova "${raceName}" muito em breve.
+Crie uma estratégia de prova curta e tática.
+Inclua 3 bullet points práticos (Ex: pacing, hidratação, mentalidade).
+Seja direto, inspirador e não use formatação markdown excessiva além dos bullets.`;
+
+    const result = await model.generateContent(prompt);
+    res.json({ strategy: result.response.text() });
+  } catch (err) {
+    console.error("[API] Erro na IA de Race Strategy:", err);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// ─── Upload e Processamento de Bioimpedância em PDF via IA ────────────────────
+router.post(
+  "/procoach/me/bioimpedance/upload",
+  pdfUpload.single("file"),
+  async (req: Request, res: Response) => {
+    try {
+      await ensureBioimpedanceTable();
+      const athleteId = await getOrCreateMonoAthleteId();
+
+      const file = (req as any).file as { buffer: Buffer; originalname?: string; mimetype?: string } | undefined;
+      if (!file?.buffer) {
+        res.status(400).json({ error: "Arquivo PDF é obrigatório (field: file)" });
+        return;
+      }
+
+      console.log(`📄 Recebido PDF do atleta ${athleteId}: ${file.originalname}`);
+      const base64Data = file.buffer.toString("base64");
+
+      const apiKey = (process.env.GEMINI_API_KEY || "").replace(/^['"`]+|['"`]+$/g, "").trim();
+      const modelName = (process.env.GEMINI_MODEL || "gemini-pro").replace(/^['"`]+|['"`]+$/g, "").trim();
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: modelName });
+
+      const prompt = `Você é um especialista em nutrição e leitura de exames.
+Analise o PDF de bioimpedância em anexo e extraia exatamente as seguintes métricas num JSON válido:
+{
+  "date": "YYYY-MM-DD",
+  "weight_kg": numero,
+  "body_fat_pct": numero,
+  "muscle_mass_kg": numero,
+  "body_water_pct": numero,
+  "visceral_fat": numero,
+  "metabolic_age": numero,
+  "tmb_kcal": numero,
+  "protein_pct": numero,
+  "bone_mass_kg": numero
+}
+Caso alguma métrica não exista no documento, retorne null no valor. Responda apenas com o JSON bruto, sem marcação markdown ou blocos de código.`;
+
+      const result = await model.generateContent([ prompt, { inlineData: { data: base64Data, mimeType: "application/pdf" } } ]);
+
+      const rawText = result.response.text();
+      const cleaned = rawText.replace(/```(?:json)?\s*/g, "").replace(/```/g, "").trim();
+      const data = JSON.parse(cleaned);
+      const entryDate = normalizeEntryDate(data.date || "");
+
+      await db.execute(sql`
+        INSERT INTO procoach_bioimpedance
+          (athlete_id, entry_date, weight_kg, body_fat_pct, muscle_mass_kg, body_water_pct, visceral_fat, metabolic_age, tmb_kcal, protein_pct, bone_mass_kg, created_at, updated_at)
+        VALUES
+          (${athleteId}, ${entryDate}, ${data.weight_kg ?? null}, ${data.body_fat_pct ?? null}, ${data.muscle_mass_kg ?? null}, ${data.body_water_pct ?? null}, ${data.visceral_fat ?? null}, ${data.metabolic_age ?? null}, ${data.tmb_kcal ?? null}, ${data.protein_pct ?? null}, ${data.bone_mass_kg ?? null}, NOW(), NOW())
+        ON CONFLICT (athlete_id, entry_date)
+        DO UPDATE SET weight_kg = EXCLUDED.weight_kg, body_fat_pct = EXCLUDED.body_fat_pct, muscle_mass_kg = EXCLUDED.muscle_mass_kg, body_water_pct = EXCLUDED.body_water_pct, visceral_fat = EXCLUDED.visceral_fat, metabolic_age = EXCLUDED.metabolic_age, tmb_kcal = EXCLUDED.tmb_kcal, protein_pct = EXCLUDED.protein_pct, bone_mass_kg = EXCLUDED.bone_mass_kg, updated_at = NOW()
+      `);
+      res.json({ success: true, message: "Upload concluído e bioimpedância salva.", data });
+    } catch (err: any) {
+      console.error("[API] Erro ao processar PDF com IA:", err);
+      res.status(500).json({ error: err?.message || "Internal Server Error" });
+    }
+  }
+);
+
 router.get("/procoach/me", async (_req: Request, res: Response) => {
   const athleteId = await getOrCreateMonoAthleteId();
   await ensureAthletesRacesColumn();
@@ -250,7 +426,7 @@ router.get("/procoach/me", async (_req: Request, res: Response) => {
 });
 
 router.post("/procoach/me/workouts", async (req: Request, res: Response) => {
-  const { date, distanceKm, type, durationMin, week, injuryAlert, rpe, painLevel, notes, shoeId } = req.body as {
+  const { date, distanceKm, type, durationMin, week, injuryAlert, rpe, painLevel, notes, shoeId, panelDistanceKm } = req.body as {
     date: string;
     distanceKm: number;
     type: string;
@@ -261,12 +437,30 @@ router.post("/procoach/me/workouts", async (req: Request, res: Response) => {
     painLevel?: number;
     notes?: string;
     shoeId?: number | null;
+    panelDistanceKm?: number | null;
   };
 
   const athleteId = await getOrCreateMonoAthleteId();
   await ensureShoesTables();
-  const roundedKm = roundKm(distanceKm);
   const entryDate = normalizeEntryDate(date);
+
+  let roundedKm = roundKm(distanceKm);
+  let panelKmToSave: number | null = null;
+
+  if (panelDistanceKm && panelDistanceKm > 0) {
+    panelKmToSave = Number(panelDistanceKm);
+    const planRows = await db.execute(sql`
+      SELECT details_json FROM procoach_plan_sessions
+      WHERE athlete_id = ${athleteId} AND session_date = ${entryDate} LIMIT 1
+    `) as any;
+    const plan = planRows.rows[0];
+    const details = typeof plan?.details_json === "string" ? JSON.parse(plan.details_json) : plan?.details_json;
+    const hiddenKm = details?.treadmillTelemetry?.restTotalKm ? Number(details.treadmillTelemetry.restTotalKm) : 0;
+
+    // Deduz do painel a quilometragem que a lona rolou sozinha (descanso)
+    const bodyKm = panelKmToSave - hiddenKm;
+    roundedKm = roundKm(Math.max(0, bodyKm));
+  }
 
   const existingEntry = await db
     .select()
@@ -274,6 +468,9 @@ router.post("/procoach/me/workouts", async (req: Request, res: Response) => {
     .where(and(eq(workoutEntriesTable.athleteId, athleteId), eq(workoutEntriesTable.entryDate, entryDate)) as any)
     .limit(1);
   if (existingEntry[0]) {
+    if (panelKmToSave !== null) {
+      await db.execute(sql`UPDATE procoach_workout_entries SET panel_distance_km = ${panelKmToSave}, distance_km = ${roundedKm} WHERE id = ${existingEntry[0].id}`);
+    }
     await upsertWorkoutFeedback({ athleteId, entryDate, rpe, painLevel, notes });
     res.json({ entry: existingEntry[0] });
     return;
@@ -294,6 +491,10 @@ router.post("/procoach/me/workouts", async (req: Request, res: Response) => {
       injuryAlert: injuryAlert ?? null,
     })
     .returning();
+
+  if (panelKmToSave !== null) {
+    await db.execute(sql`UPDATE procoach_workout_entries SET panel_distance_km = ${panelKmToSave} WHERE id = ${entry.id}`);
+  }
 
   await upsertWorkoutFeedback({ athleteId, entryDate, rpe, painLevel, notes });
 
@@ -400,48 +601,6 @@ router.get("/procoach/me/spotify-recommendation", async (req: Request, res: Resp
       url: "https://open.spotify.com/playlist/37i9dQZF1DX76Wlfdnj7AP"
     }
   });
-});
-
-// ─── Strava Webhooks ──────────────────────────────────────────────────────────
-
-router.get("/procoach/webhook/strava", (req: Request, res: Response) => {
-  // Este token é inventado por si e será colocado no painel do Strava
-  const VERIFY_TOKEN = process.env.STRAVA_VERIFY_TOKEN || "COACH_PRO_STRAVA_SECRET";
-
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
-
-  if (mode && token) {
-    if (mode === "subscribe" && token === VERIFY_TOKEN) {
-      console.log("✅ Strava Webhook verificado com sucesso!");
-      // O Strava exige que o JSON devolva exatamente o challenge que eles enviaram
-      res.json({ "hub.challenge": challenge });
-    } else {
-      res.sendStatus(403);
-    }
-  } else {
-    res.sendStatus(400);
-  }
-});
-
-router.post("/procoach/webhook/strava", async (req: Request, res: Response) => {
-  // 1. O Strava exige resposta imediata com status 200 para não bloquear a fila de eventos
-  res.status(200).send("EVENT_RECEIVED");
-
-  const body = req.body as any;
-  console.log("🔔 Evento do Strava Recebido:", body);
-
-  // 2. Filtramos apenas para quando o atleta termina (cria) uma atividade nova
-  if (body.object_type === "activity" && body.aspect_type === "create") {
-    const activityId = body.object_id;
-    
-    await sendTelegram(
-      `🏃 *Novo Treino Detectado no Strava!*\n\n` +
-      `*Atividade ID:* \`${activityId}\`\n\n` +
-      `_(Fase 1 Completa: O nosso servidor já sabe que você acabou de correr!)_`
-    );
-  }
 });
 
 // ─── Shoes (Equipamentos) ─────────────────────────────────────────────────────
@@ -771,11 +930,22 @@ router.post("/procoach/me/plan/import-text", async (req: Request, res: Response)
   if (sessions.length === 0) { res.status(400).json({ error: "no sessions parsed" }); return; }
 
   for (const s of sessions) {
+        const bike = parseBike(s.structure);
+        const segments = parseSegments(s.structure);
+        const blocks = groupBlocks(segments);
+        const treadmillTelemetry = computeTreadmillTelemetry({
+          structure: s.structure, paceTarget: s.paceTarget, treadmillSpeed: s.treadmillSpeed, restInterval: s.restInterval, segments
+        });
+        const detailsJson = JSON.stringify({
+          source: "text_import", modalities: inferModalities(s.activity, s.structure),
+          bike, segments, blocks, treadmillTelemetry
+        });
+
     await db.execute(sql`
       INSERT INTO procoach_plan_sessions
-        (athlete_id, session_date, day_name, activity, pace_target, treadmill_speed, rest_interval, structure, planned_km, created_at, updated_at)
+            (athlete_id, session_date, day_name, activity, pace_target, treadmill_speed, rest_interval, structure, planned_km, details_json, created_at, updated_at)
       VALUES
-        (${athleteId}, ${s.sessionDate}, ${s.dayName}, ${s.activity}, ${s.paceTarget}, ${s.treadmillSpeed}, ${s.restInterval}, ${s.structure}, ${s.plannedKm}, NOW(), NOW())
+            (${athleteId}, ${s.sessionDate}, ${s.dayName}, ${s.activity}, ${s.paceTarget}, ${s.treadmillSpeed}, ${s.restInterval}, ${s.structure}, ${s.plannedKm}, ${detailsJson}::jsonb, NOW(), NOW())
       ON CONFLICT (athlete_id, session_date)
       DO UPDATE SET
         day_name = EXCLUDED.day_name,
@@ -785,6 +955,7 @@ router.post("/procoach/me/plan/import-text", async (req: Request, res: Response)
         rest_interval = EXCLUDED.rest_interval,
         structure = EXCLUDED.structure,
         planned_km = EXCLUDED.planned_km,
+            details_json = EXCLUDED.details_json,
         updated_at = NOW()
     `);
   }
@@ -1751,7 +1922,7 @@ router.get("/procoach/athletes/:deviceId", async (req: Request, res: Response) =
 
 router.post("/procoach/athletes/:deviceId/workouts", async (req: Request, res: Response) => {
   const deviceId = String(req.params.deviceId);
-  const { date, distanceKm, type, durationMin, week, injuryAlert, rpe, painLevel, notes } = req.body as {
+  const { date, distanceKm, type, durationMin, week, injuryAlert, rpe, painLevel, notes, panelDistanceKm } = req.body as {
     date: string;
     distanceKm: number;
     type: string;
@@ -1761,6 +1932,7 @@ router.post("/procoach/athletes/:deviceId/workouts", async (req: Request, res: R
     rpe?: number;
     painLevel?: number;
     notes?: string;
+    panelDistanceKm?: number | null;
   };
 
   const athletes = await db
@@ -1775,8 +1947,24 @@ router.post("/procoach/athletes/:deviceId/workouts", async (req: Request, res: R
   }
 
   const athleteId = athletes[0]!.id;
-  const roundedKm = roundKm(distanceKm);
   const entryDate = normalizeEntryDate(date);
+
+  let roundedKm = roundKm(distanceKm);
+  let panelKmToSave: number | null = null;
+
+  if (panelDistanceKm && panelDistanceKm > 0) {
+    panelKmToSave = Number(panelDistanceKm);
+    const planRows = await db.execute(sql`
+      SELECT details_json FROM procoach_plan_sessions
+      WHERE athlete_id = ${athleteId} AND session_date = ${entryDate} LIMIT 1
+    `) as any;
+    const plan = planRows.rows[0];
+    const details = typeof plan?.details_json === "string" ? JSON.parse(plan.details_json) : plan?.details_json;
+    const hiddenKm = details?.treadmillTelemetry?.restTotalKm ? Number(details.treadmillTelemetry.restTotalKm) : 0;
+
+    const bodyKm = panelKmToSave - hiddenKm;
+    roundedKm = roundKm(Math.max(0, bodyKm));
+  }
 
   const existingEntry = await db
     .select()
@@ -1784,6 +1972,9 @@ router.post("/procoach/athletes/:deviceId/workouts", async (req: Request, res: R
     .where(and(eq(workoutEntriesTable.athleteId, athleteId), eq(workoutEntriesTable.entryDate, entryDate)) as any)
     .limit(1);
   if (existingEntry[0]) {
+    if (panelKmToSave !== null) {
+      await db.execute(sql`UPDATE procoach_workout_entries SET panel_distance_km = ${panelKmToSave}, distance_km = ${roundedKm} WHERE id = ${existingEntry[0].id}`);
+    }
     await upsertWorkoutFeedback({ athleteId, entryDate, rpe, painLevel, notes });
     res.json({ entry: existingEntry[0] });
     return;
@@ -1801,6 +1992,10 @@ router.post("/procoach/athletes/:deviceId/workouts", async (req: Request, res: R
       injuryAlert: injuryAlert ?? null,
     })
     .returning();
+
+  if (panelKmToSave !== null) {
+    await db.execute(sql`UPDATE procoach_workout_entries SET panel_distance_km = ${panelKmToSave} WHERE id = ${entry.id}`);
+  }
 
   await upsertWorkoutFeedback({ athleteId, entryDate, rpe, painLevel, notes });
 
@@ -1891,11 +2086,22 @@ router.post("/procoach/athletes/:deviceId/plan/import-text", async (req: Request
 
   for (const s of sessions) {
     const plannedKm = parsePlannedKmFromStrings(s.activity, s.structure);
+    const bike = parseBike(s.structure);
+    const segments = parseSegments(s.structure);
+    const blocks = groupBlocks(segments);
+    const treadmillTelemetry = computeTreadmillTelemetry({
+      structure: s.structure, paceTarget: s.paceTarget, treadmillSpeed: s.treadmillSpeed, restInterval: s.restInterval, segments
+    });
+    const detailsJson = JSON.stringify({
+      source: "text_import", modalities: inferModalities(s.activity, s.structure),
+      bike, segments, blocks, treadmillTelemetry
+    });
+
     await db.execute(sql`
       INSERT INTO procoach_plan_sessions
-        (athlete_id, session_date, day_name, activity, pace_target, treadmill_speed, rest_interval, structure, planned_km, created_at, updated_at)
+        (athlete_id, session_date, day_name, activity, pace_target, treadmill_speed, rest_interval, structure, planned_km, details_json, created_at, updated_at)
       VALUES
-        (${athleteId}, ${s.sessionDate}, ${s.dayName}, ${s.activity}, ${s.paceTarget}, ${s.treadmillSpeed}, ${s.restInterval}, ${s.structure}, ${plannedKm}, NOW(), NOW())
+        (${athleteId}, ${s.sessionDate}, ${s.dayName}, ${s.activity}, ${s.paceTarget}, ${s.treadmillSpeed}, ${s.restInterval}, ${s.structure}, ${plannedKm}, ${detailsJson}::jsonb, NOW(), NOW())
       ON CONFLICT (athlete_id, session_date)
       DO UPDATE SET
         day_name = EXCLUDED.day_name,
@@ -1905,6 +2111,7 @@ router.post("/procoach/athletes/:deviceId/plan/import-text", async (req: Request
         rest_interval = EXCLUDED.rest_interval,
         structure = EXCLUDED.structure,
         planned_km = EXCLUDED.planned_km,
+        details_json = EXCLUDED.details_json,
         updated_at = NOW()
     `);
   }

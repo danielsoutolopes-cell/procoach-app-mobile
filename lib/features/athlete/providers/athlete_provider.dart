@@ -16,8 +16,8 @@ class AthleteNotifier extends AsyncNotifier<Athlete> {
     final athleteService = ref.watch(athleteServiceProvider);
     
     // Como o app é mono-usuário, podemos usar um ID fixo ou deixar que o backend 
-    // (Neon/Node) resolva o "Primary Athlete" automaticamente.
-    const monoAthleteId = '1'; 
+    // (Neon/Node) resolva o "Primary Athlete" automaticamente através da chave "mono".
+    const monoAthleteId = 'mono'; 
     
     // Faz a chamada à API e retorna o Atleta. 
     // O Riverpod coloca o estado como AsyncLoading() automaticamente enquanto aguarda!
@@ -49,6 +49,32 @@ class AthleteNotifier extends AsyncNotifier<Athlete> {
     } catch (error, stackTrace) {
       // 3. Rollback: Se a internet falhar, desfazemos a alteração na UI silenciosamente
       state = previousState;
+    }
+  }
+
+  /// Adiciona uma nova prova ao calendário do atleta
+  Future<void> addRace(Map<String, dynamic> raceData) async {
+    try {
+      final athleteService = ref.read(athleteServiceProvider);
+      // Envia a requisição vinculada ao dispositivo primário "mono"
+      await athleteService.addRace('mono', raceData);
+      // Força a recarga do Provider, atualizando os ponteiros e listas do Dashboard automaticamente
+      ref.invalidateSelf();
+    } catch (e) {
+      throw Exception('Falha ao cadastrar a prova: $e');
+    }
+  }
+
+  /// Define a prova âncora do macrociclo
+  Future<void> setMacrocycleAnchor(String raceId) async {
+    try {
+      final athleteService = ref.read(athleteServiceProvider);
+      // Envia a requisição vinculada ao dispositivo primário "mono"
+      await athleteService.setMacrocycleAnchor('mono', raceId);
+      // Recarrega o estado do atleta para que todo o app se reajuste ao novo macrociclo
+      ref.invalidateSelf();
+    } catch (e) {
+      throw Exception('Falha ao definir âncora: $e');
     }
   }
 }

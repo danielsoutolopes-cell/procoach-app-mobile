@@ -10,6 +10,7 @@ const router: IRouter = Router();
 interface BotSession {
   state:
     | "idle"
+    | "waiting_distance"
     | "waiting_rpe"
     | "waiting_pain"
     | "waiting_bio_weight"
@@ -18,6 +19,7 @@ interface BotSession {
   largadaAt?: Date;
   rpe?: number;
   sessionDistanceKm?: number;
+  panelDistanceKm?: number;
 }
 const SESSION: BotSession = { state: "idle" };
 
@@ -455,9 +457,24 @@ async function handleChegada(chatId: string | number) {
     return;
   }
   const duration = fmtDuration(Date.now() - SESSION.largadaAt.getTime());
-  SESSION.state = "waiting_rpe";
+  SESSION.state = "waiting_distance";
   await sendTelegram(chatId,
     `🏁 *CHEGADA!* Duração: *${duration}*\n\n` +
+    `Qual foi a distância final marcada no painel da esteira ou relógio (em km)?\n` +
+    `_Ex: 5.2_`
+  );
+}
+
+async function handleDistanceSelected(chatId: string | number, text: string) {
+  const dist = parseFloat(text.replace(",", "."));
+  if (isNaN(dist) || dist <= 0) {
+    await sendTelegram(chatId, "❌ Distância inválida. Envie apenas o número (ex: 5.2):");
+    return;
+  }
+  SESSION.panelDistanceKm = dist;
+  SESSION.sessionDistanceKm = dist;
+  SESSION.state = "waiting_rpe";
+  await sendTelegram(chatId,
     `Qual foi o teu *RPE* (Percepção de Esforço)?\n` +
     `_1 = Muito fácil · 10 = Máximo absoluto_`,
     rpeKeyboard()
@@ -481,10 +498,32 @@ async function handlePainSelected(chatId: string | number, pain: number) {
   const rpe = SESSION.rpe ?? 5;
   const distKm = SESSION.sessionDistanceKm ?? 0;
 
+  let roundedKm = roundKm(distKm > 0 ? distKm : 8);
+  let panelKmToSave: number | null = null;
+  let hiddenKm = 0;
+  let treadmillMsg = "";
+
   const athlete = await getPrimaryAthlete();
   if (athlete) {
     const today = getSaoPauloDayKey();
     const week = athlete.currentWeek;
+
+    const planRows = await db.execute(sql`
+      SELECT details_json FROM procoach_plan_sessions
+      WHERE athlete_id = ${athlete.id} AND session_date = ${today} LIMIT 1
+    `) as { rows: any[] };
+    const plan = planRows.rows[0];
+    const details = typeof plan?.details_json === "string" ? JSON.parse(plan.details_json) : plan?.details_json;
+    hiddenKm = details?.treadmillTelemetry?.restTotalKm ? Number(details.treadmillTelemetry.restTotalKm) : 0;
+
+    if (SESSION.panelDistanceKm && SESSION.panelDistanceKm > 0 && hiddenKm > 0) {
+      panelKmToSave = SESSION.panelDistanceKm;
+      const bodyKm = panelKmToSave - hiddenKm;
+      roundedKm = roundKm(Math.max(0, bodyKm));
+      treadmillMsg = `\n🏃‍♂️ *Telemetria Esteira:*\nPainel: ${panelKmToSave} km\nOculto (descanso): -${hiddenKm.toFixed(2)} km\nVolume Real (Corpo): *${roundedKm} km*\n`;
+    } else {
+      roundedKm = roundKm(distKm > 0 ? distKm : 8);
+    }
 
     const existing = await db
       .select()
@@ -494,15 +533,20 @@ async function handlePainSelected(chatId: string | number, pain: number) {
 
     if (existing.length === 0) {
       // Save workout entry
-      await db.insert(workoutEntriesTable).values({
+      const [entry] = await db.insert(workoutEntriesTable).values({
         athleteId: athlete.id,
         entryDate: today,
-        distanceKm: roundKm(distKm > 0 ? distKm : 8),
+        distanceKm: roundedKm,
         type: "corrida",
         durationMin: SESSION.largadaAt ? Math.round((Date.now() - SESSION.largadaAt.getTime()) / 60000) : 0,
         week,
         injuryAlert: pain > 2 ? `Dor: ${pain}/5 RPE: ${rpe}/10` : null,
-      });
+      }).returning();
+      if (panelKmToSave !== null && entry) {
+        await db.execute(sql`UPDATE procoach_workout_entries SET panel_distance_km = ${panelKmToSave} WHERE id = ${entry.id}`);
+      }
+    } else if (panelKmToSave !== null) {
+      await db.execute(sql`UPDATE procoach_workout_entries SET panel_distance_km = ${panelKmToSave}, distance_km = ${roundedKm} WHERE id = ${existing[0].id}`);
     }
 
     // Update weekly stats
@@ -512,7 +556,7 @@ async function handlePainSelected(chatId: string | number, pain: number) {
       .where(sql`${weeklyStatsTable.athleteId} = ${athlete.id} AND ${weeklyStatsTable.week} = ${week}`)
       .limit(1);
 
-    const addKm = roundKm(distKm > 0 ? distKm : 8);
+    const addKm = roundedKm;
     if (existingWeek.length > 0) {
       await db.update(weeklyStatsTable)
         .set({
@@ -541,9 +585,10 @@ async function handlePainSelected(chatId: string | number, pain: number) {
   let summary = `✅ *Sessão concluída!*\n\n` +
     `⚡ RPE: *${rpe}/10*\n` +
     `🦵 Dor articular: *${pain}/5*\n` +
-    `📊 Fase: *${phase.name}* (Semana ${athlete?.currentWeek ?? "—"})\n\n`;
+    `📊 Fase: *${phase.name}* (Semana ${athlete?.currentWeek ?? "—"})\n` +
+    treadmillMsg + `\n`;
 
-  const radarMsg = radarArticular(rpe, pain, distKm);
+  const radarMsg = radarArticular(rpe, pain, roundedKm);
   if (radarMsg) {
     await sendTelegram(chatId, summary + "_Dados guardados._");
     await sendTelegram(chatId, radarMsg);
@@ -555,6 +600,7 @@ async function handlePainSelected(chatId: string | number, pain: number) {
   SESSION.largadaAt = undefined;
   SESSION.rpe = undefined;
   SESSION.sessionDistanceKm = undefined;
+  SESSION.panelDistanceKm = undefined;
 }
 
 async function handlePlano(chatId: string | number) {
@@ -919,6 +965,10 @@ router.post("/telegram/webhook", async (req: Request, res: Response) => {
     if (!text) return;
 
     // State machine: bio data collection
+    if (SESSION.state === "waiting_distance") {
+      await handleDistanceSelected(msgChatId, text);
+      return;
+    }
     if (SESSION.state === "waiting_bio_weight") {
       await handleBioWeight(msgChatId, text);
       return;

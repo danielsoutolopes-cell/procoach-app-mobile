@@ -203,6 +203,7 @@ async function processStravaActivity(athleteId: number, activityId: number) {
           week: weekNum,
           source: 'strava',
           externalId: activityId as any,
+          shoeId: null, // Força a pendência de atribuição do tênis no App
         });
 
         // 3.2 Soma os quilômetros na tabela de Estatísticas da Semana (se for corrida longa)

@@ -316,6 +316,10 @@ export async function ensureShoesTables(): Promise<void> {
     ALTER TABLE IF EXISTS procoach_workout_entries
       ADD COLUMN IF NOT EXISTS external_id BIGINT
   `);
+  await db.execute(sql`
+    ALTER TABLE IF EXISTS procoach_workout_entries
+      ADD COLUMN IF NOT EXISTS panel_distance_km NUMERIC(6,2)
+  `);
 
   shoesTablesReady = true;
 }

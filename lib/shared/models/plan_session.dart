@@ -1,25 +1,28 @@
 class PlanSession {
-  final String date;
+  final int week;
+  final String day;
   final String activity;
-  final String? paceTarget;
-  final String? structure;
-  final num? plannedKm;
+  final String? details;
+  final String? pace;
+  final int? km;
 
   PlanSession({
-    required this.date,
+    required this.week,
+    required this.day,
     required this.activity,
-    this.paceTarget,
-    this.structure,
-    this.plannedKm,
+    this.details,
+    this.pace,
+    this.km,
   });
 
+  // Fábrica para demonstração, pode ser ajustada para o JSON real da sua API
   factory PlanSession.fromJson(Map<String, dynamic> json) {
     return PlanSession(
-      date: json['session_date'] ?? '',
-      activity: json['activity'] ?? '',
-      paceTarget: json['pace_target'],
-      structure: json['structure'],
-      plannedKm: json['planned_km'],
+      week: json['week'] as int,
+      day: json['day'] as String,
+      activity: json['activity'] as String,
+      details: json['details'] as String?,
+      km: json['km'] as int?,
     );
   }
 }

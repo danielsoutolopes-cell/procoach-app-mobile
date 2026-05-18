@@ -6,6 +6,7 @@ import 'package:procoach_os/features/dashboard/screens/dashboard_screen.dart';
 import 'package:procoach_os/features/dashboard/screens/next_workout_screen.dart';
 import 'package:procoach_os/features/status/screens/status_screen.dart';
 import 'package:procoach_os/shared/models/plan_screen.dart';
+import 'package:procoach_os/features/status/screens/import_screen.dart';
 import 'package:procoach_os/shared/models/shoes_screen.dart';
 
 /// Provider que expõe as nossas Rotas. 
@@ -45,6 +46,12 @@ final goRouterProvider = Provider<GoRouter>((ref) {
               GoRoute(
                 path: '/status',
                 builder: (context, state) => const StatusScreen(),
+                routes: [
+                  GoRoute(
+                    path: 'import', // Acessível via /status/import
+                    builder: (context, state) => const ImportScreen(),
+                  ),
+                ],
               ),
             ],
           ),

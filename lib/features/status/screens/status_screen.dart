@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:procoach_os/features/status/services/bioimpedance_service.dart';
 import 'package:procoach_os/features/status/providers/bioimpedance_provider.dart';
@@ -10,6 +11,7 @@ import 'package:procoach_os/features/status/providers/strength_provider.dart';
 import 'package:procoach_os/shared/models/strength_routine.dart';
 import 'package:procoach_os/features/status/widgets/weekly_volume_chart.dart';
 import 'package:procoach_os/features/status/providers/bioimpedance_history_provider.dart';
+import 'package:procoach_os/features/athlete/providers/athlete_provider.dart';
 
 class StatusScreen extends ConsumerWidget {
   const StatusScreen({super.key});
@@ -41,6 +43,10 @@ class StatusScreen extends ConsumerWidget {
           children: [
             const WeeklyVolumeChart(),
             const SizedBox(height: 24),
+            _buildPersonalBestsCard(context, ref),
+            const SizedBox(height: 24),
+            _buildMaintenanceActionsCard(context),
+            const SizedBox(height: 24),
             _buildBioimpedanceCard(context, ref),
             const SizedBox(height: 24),
             _buildBioHistoryChart(context, ref),
@@ -48,6 +54,26 @@ class StatusScreen extends ConsumerWidget {
             const StrengthLibraryWidget(),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildMaintenanceActionsCard(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A1A),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: ListTile(
+        leading: const Icon(Icons.upload_file, color: Colors.deepOrangeAccent),
+        title: const Text('Importadores do Plano', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        subtitle: const Text('Planilhas de treino em JSON ou PDF', style: TextStyle(color: Colors.grey)),
+        trailing: const Icon(Icons.arrow_forward_ios, color: Colors.grey, size: 16),
+        onTap: () {
+          context.go('/status/import');
+        },
       ),
     );
   }
@@ -168,6 +194,126 @@ class StatusScreen extends ConsumerWidget {
           )
         ],
       ),
+    );
+  }
+
+    final athleteAsync = ref.watch(athleteProvider);
+    final currentYear = DateTime.now().year.toString();
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A1A),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'RECORDES PESSOAIS (PRs) - $currentYear',
+            style: const TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+          ),
+          const SizedBox(height: 16),
+          // TODO: Substituir por dados vindos da API (athlete.personalBests)
+            data: (athlete) {
+              final races = athlete.races ?? [];
+
+              int timeToSec(String? t) {
+                if (t == null || t == '--:--') return 999999;
+                final p = t.split(':');
+                if (p.length == 2) return (int.tryParse(p[0]) ?? 0) * 60 + (int.tryParse(p[1]) ?? 0);
+                if (p.length == 3) return (int.tryParse(p[0]) ?? 0) * 3600 + (int.tryParse(p[1]) ?? 0) * 60 + (int.tryParse(p[2]) ?? 0);
+                return 999999;
+              }
+
+              String formatDate(String d) {
+                try {
+                  final dt = DateTime.parse(d);
+                  final months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+                  return '${dt.day.toString().padLeft(2, '0')} ${months[dt.month - 1]} ${dt.year}';
+                } catch (_) {
+                  return d;
+                }
+              }
+
+              final validRaces = races.where((r) {
+                final d = r['date'] ?? r['data'] ?? '';
+                final t = r['finishTime'];
+                return d.toString().startsWith(currentYear) && t != null && t != '--:--';
+              }).toList();
+
+              Map<String, dynamic>? pr10k;
+              Map<String, dynamic>? pr21k;
+
+              for (var r in validRaces) {
+                final dist = double.tryParse(r['distancia'].toString()) ?? 0;
+                final sec = timeToSec(r['finishTime']);
+                
+                if (dist >= 9.5 && dist <= 10.5) {
+                  if (pr10k == null || sec < timeToSec(pr10k['finishTime'])) pr10k = r;
+                } else if (dist >= 20.5 && dist <= 21.5) {
+                  if (pr21k == null || sec < timeToSec(pr21k['finishTime'])) pr21k = r;
+                }
+              }
+
+              return Column(
+                children: [
+                  _buildPRItem('10K', pr10k?['finishTime'] ?? '--:--', pr10k?['finishPace'] ?? '--/km', pr10k != null ? '${formatDate(pr10k['date'] ?? pr10k['data'])} - ${pr10k['name']}' : 'Ainda sem marca no ano', pr10k?['weatherCondition'] ?? ''),
+                  const Divider(color: Colors.white10, height: 24),
+                  _buildPRItem('21K', pr21k?['finishTime'] ?? '--:--', pr21k?['finishPace'] ?? '--/km', pr21k != null ? '${formatDate(pr21k['date'] ?? pr21k['data'])} - ${pr21k['name']}' : 'Ainda sem marca no ano', pr21k?['weatherCondition'] ?? ''),
+                ],
+              );
+            },
+            loading: () => const Center(child: CircularProgressIndicator(color: Colors.deepOrangeAccent)),
+            error: (_, __) => const Center(child: Text('Erro ao carregar recordes', style: TextStyle(color: Colors.white54))),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPRItem(String distance, String time, String pace, String details, String weather) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.deepOrangeAccent.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.deepOrangeAccent.withOpacity(0.5)),
+          ),
+          child: Text(
+            distance,
+            style: const TextStyle(color: Colors.deepOrangeAccent, fontWeight: FontWeight.bold, fontSize: 16),
+          ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Text(time, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(width: 8),
+                  if (pace.isNotEmpty && pace != '--/km')
+                    Text('($pace)', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Expanded(child: Text(details, style: const TextStyle(color: Colors.grey, fontSize: 12))),
+                  if (weather.isNotEmpty)
+                    Text(weather, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 

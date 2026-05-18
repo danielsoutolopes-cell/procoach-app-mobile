@@ -1,433 +1,72 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { eq, and, desc, sql } from "@workspace/db";
 import { db } from "@workspace/db";
-import multer from "multer";
-import PDFDocument from "pdfkit";
-import pdfParse from "pdf-parse";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import {
   athletesTable,
-  shoesTable,
   workoutEntriesTable,
   weeklyStatsTable,
-  insertAthleteSchema,
 } from "@workspace/db/schema";
 import {
   parsePlanImportText,
   parsePlannedKmFromStrings,
-  formatKmh,
   parseBike,
   parseSegments,
   groupBlocks,
   computeTreadmillTelemetry,
-  parseInterval,
-  sumDistanceKm,
-  inferModalities,
-  parsePlanDate,
-  parseKmhNumber,
-  parsePaceMinPerKm,
-  kmhFromPace,
-  formatKmhFromPaceTarget,
-  parseRestSeconds,
-  isStrengthOrBikePart
+  inferModalities
 } from "./PlanParserService";
 import {
   MONO_DEVICE_ID,
-  getOrCreateMonoAthleteId,
   ensureGelTables,
-  ensureWorkoutFeedbackTable,
   ensurePlanTable,
-  StrengthTemplateCode,
-  ensureStrengthTables,
-  ensureStrengthCatalogSeed,
-  ensureShoesTables,
   ensureBioimpedanceTable,
   ensureAthletesRacesColumn
 } from "./migrations";
-import { getRainProbability, sendTelegram } from "./procoach-utils";
-
-function mapOpenWeatherToWMO(id: number): number {
-  if (id === 800) return 0;
-  if (id === 801 || id === 802) return 2;
-  if (id === 803 || id === 804) return 3;
-  if (id >= 200 && id < 300) return 95;
-  if (id >= 300 && id < 400) return 51;
-  if (id >= 500 && id < 600) return 63;
-  if (id >= 600 && id < 700) return 71;
-  if (id >= 700 && id < 800) return 45;
-  return 0;
-}
+import { 
+  roundKm, 
+  normalizeEntryDate, 
+  computeRacePointers, 
+  getRainProbability, 
+  sendTelegram, 
+  asNumberOrNull,
+  upsertWorkoutFeedback,
+  getSaoPauloDayKey
+} from "./procoach-utils";
 
 const router: IRouter = Router();
 
-const pdfUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
-});
-
-function roundKm(val: number): number {
-  return Math.round(val);
-}
-
-function normalizeEntryDate(raw: string): string {
-  if (typeof raw !== "string") return new Date().toISOString().slice(0, 10);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-  const parsed = new Date(raw);
-  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
-  return new Date().toISOString().slice(0, 10);
-}
-
-function getSaoPauloDayKey(): string {
-  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
-}
-
-function getSaoPauloTomorrowKey(): string {
-  const d = new Date();
-  const spDate = new Date(d.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
-  spDate.setDate(spDate.getDate() + 1);
-  const yyyy = spDate.getFullYear();
-  const mm = String(spDate.getMonth() + 1).padStart(2, "0");
-  const dd = String(spDate.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-/**
- * Calcula os ponteiros de prova para o atleta (Próxima Prova, Próxima P1 e Âncora do Macrociclo).
- * 
- * @param races - Array de provas cadastradas.
- * @param macrocycleRaceId - (Opcional) ID da prova selecionada manualmente pelo usuário para ser a âncora.
- * @returns Ponteiros para nextRace, nextP1 e anchor.
- */
-function computeRacePointers(races: any[], macrocycleRaceId?: string | null) {
-  if (!Array.isArray(races)) return { nextRace: null, nextP1: null, anchor: null };
-  const today = getSaoPauloDayKey();
-  const valid = races.filter((r) => r.data && r.data >= today && r.status !== "cancelada");
-  valid.sort((a, b) => a.data.localeCompare(b.data));
-
-  const nextRace = valid[0] ?? null;
-  const nextP1 = valid.find((r) => r.tipo_tatico === "P1") ?? null;
-  
-  // Prioridade 1: Buscar a prova na lista valid onde id === macrocycleRaceId
-  let anchor = macrocycleRaceId ? valid.find((r) => String(r.id) === String(macrocycleRaceId)) ?? null : null;
-
-  // Prioridade 2 (Fallback): Se não encontrou a prova manual, usa a próxima P1
-  if (!anchor) {
-    anchor = nextP1;
-  }
-
-  return { nextRace, nextP1, anchor };
-}
-
-function asNumberOrNull(val: unknown): number | null {
-  if (val === null || val === undefined || val === "") return null;
-  const n = typeof val === "number" ? val : Number(String(val).replace(",", ".").trim());
-  if (!Number.isFinite(n)) return null;
-  return n;
-}
-
-async function upsertWorkoutFeedback(payload: {
-  athleteId: number;
-  entryDate: string;
-  rpe?: number;
-  painLevel?: number;
-  notes?: string;
-}): Promise<void> {
-  await ensureWorkoutFeedbackTable();
-  const rpeVal = payload.rpe === undefined ? null : Math.max(1, Math.min(10, Math.round(payload.rpe)));
-  const painVal = payload.painLevel === undefined ? null : Math.max(0, Math.min(5, Math.round(payload.painLevel)));
-  const notes = payload.notes ? String(payload.notes).slice(0, 2000) : null;
-  if (rpeVal === null && painVal === null && notes === null) return;
-  await db.execute(sql`
-    INSERT INTO procoach_workout_feedback (athlete_id, entry_date, rpe, pain_level, notes, created_at, updated_at)
-    VALUES (${payload.athleteId}, ${payload.entryDate}, ${rpeVal}, ${painVal}, ${notes}, NOW(), NOW())
-    ON CONFLICT (athlete_id, entry_date)
-    DO UPDATE SET
-      rpe = COALESCE(EXCLUDED.rpe, procoach_workout_feedback.rpe),
-      pain_level = COALESCE(EXCLUDED.pain_level, procoach_workout_feedback.pain_level),
-      notes = COALESCE(EXCLUDED.notes, procoach_workout_feedback.notes),
-      updated_at = NOW()
-  `);
-
-  if (painVal !== null) {
-    // Atualiza o nível de dor no perfil do atleta para integrar com o Radar Articular
-    await db.update(athletesTable)
-      .set({ painLevel: painVal, updatedAt: new Date() })
-      .where(eq(athletesTable.id, payload.athleteId));
-  }
-}
-
-router.post("/procoach/athletes/sync", async (req: Request, res: Response) => {
-  // Validação em tempo de execução com Zod
-  const body = (req.body ?? {}) as Record<string, unknown>;
-  const inferredDeviceId =
-    typeof body.deviceId === "string" && body.deviceId.trim()
-      ? body.deviceId.trim()
-      : MONO_DEVICE_ID;
-  const parseResult = insertAthleteSchema.safeParse({ ...body, deviceId: inferredDeviceId });
-
-  if (!parseResult.success) {
-    res.status(400).json({ error: "Invalid athlete data", details: parseResult.error.issues });
-    return;
-  }
-
-  // Desestruturamos os dados validados pelo Zod.
-  const { deviceId, ...restOfAthleteData } = parseResult.data;
-
-  const existing = await db
-    .select()
-    .from(athletesTable)
-    // O cast 'as any' no operador 'eq' resolve o conflito de tipos Drizzle em monorepos (Error 2345/2769).
-    .where(eq(athletesTable.deviceId, deviceId) as any)
-    .limit(1);
-
-  let athlete;
-  if (existing.length === 0) {
-    const defaultRaceDate = restOfAthleteData.targetRaceDate ?? new Date(Date.now() + 16 * 7 * 24 * 60 * 60 * 1000).toISOString();
-    const [created] = await db
-      .insert(athletesTable)
-      .values({
-        ...restOfAthleteData, // Inclui todos os campos validados, exceto deviceId e races
-        deviceId: deviceId, // deviceId é obrigatório e já vem do parseResult.data
-        targetRaceDistanceKm: restOfAthleteData.targetRaceDistanceKm ? roundKm(restOfAthleteData.targetRaceDistanceKm) : 42,
-        targetRaceDate: defaultRaceDate, // Garante que a data padrão seja usada se não fornecida
-      })
-      .returning();
-    athlete = created;
-  } else {
-    const [updated] = await db
-      .update(athletesTable)
-      .set({
-        ...Object.fromEntries(
-          Object.entries(restOfAthleteData).filter(([, value]) => value !== undefined)
-        ),
-        updatedAt: new Date(),
-      })
-      .where(eq(athletesTable.deviceId, deviceId) as any)
-      .returning();
-    athlete = updated;
-  }
-
-  // Atualiza o Calendário Perene de forma segura (ignorando restrições temporárias do Zod/Drizzle)
-  const racesRaw = Array.isArray(body.races) ? body.races : [];
-  await ensureAthletesRacesColumn();
-  await db.execute(sql`
-    UPDATE procoach_athletes
-    SET races = ${JSON.stringify(racesRaw)}::jsonb
-    WHERE device_id = ${deviceId}
-  `);
-
-  const updatedRows = await db.execute(sql`SELECT * FROM procoach_athletes WHERE device_id = ${deviceId} LIMIT 1`) as any;
-  const updatedAthlete = updatedRows.rows[0];
-  const pointers = computeRacePointers(
-    typeof updatedAthlete.races === "string" ? JSON.parse(updatedAthlete.races) : updatedAthlete.races,
-    updatedAthlete.macrocycleRaceId ?? updatedAthlete.macrocycle_race_id
-  );
-
-  res.json({ athlete: updatedAthlete, pointers });
-});
-
-// ─── Gemini Race Strategy ─────────────────────────────────────────────────────
-router.post("/procoach/me/race-strategy", async (req: Request, res: Response) => {
+router.get("/procoach/athletes/:deviceId/profile", async (req: Request, res: Response) => {
   try {
-    const { raceName } = req.body as { raceName?: string };
-    if (!raceName) {
-      res.status(400).json({ error: "raceName is required" });
+    const deviceId = String(req.params.deviceId);
+    await ensureAthletesRacesColumn();
+    await ensureGelTables();
+
+    const athleteRows = await db.execute(sql`SELECT * FROM procoach_athletes WHERE device_id = ${deviceId} LIMIT 1`) as any;
+    const athlete = athleteRows.rows[0];
+    
+    if (!athlete) {
+      res.status(404).json({ error: "Athlete not found" });
       return;
     }
 
-    const apiKey = (process.env.GEMINI_API_KEY || "").replace(/^['"`]+|['"`]+$/g, "").trim();
-    const modelName = (process.env.GEMINI_MODEL || "gemini-pro").replace(/^['"`]+|['"`]+$/g, "").trim();
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: modelName });
+    const gelRows = await db.execute(sql`SELECT gels_in_stock FROM procoach_gel_stock WHERE athlete_id = ${athlete.id} LIMIT 1`) as any;
+    const currentGels = gelRows.rows[0] ? Number(gelRows.rows[0].gels_in_stock) : 0;
 
-    const prompt = `Você é um treinador de corrida de elite. Seu atleta vai correr a prova "${raceName}" muito em breve.
-Crie uma estratégia de prova curta e tática.
-Inclua 3 bullet points práticos (Ex: pacing, hidratação, mentalidade).
-Seja direto, inspirador e não use formatação markdown excessiva além dos bullets.`;
+    let races = [];
+    if (athlete.races) {
+      races = typeof athlete.races === "string" ? JSON.parse(athlete.races) : athlete.races;
+    }
 
-    const result = await model.generateContent(prompt);
-    res.json({ strategy: result.response.text() });
+    res.json({
+      id: athlete.id.toString(),
+      name: athlete.name || "CEO",
+      gel_inventory: currentGels,
+      races: races,
+    });
   } catch (err) {
-    console.error("[API] Erro na IA de Race Strategy:", err);
+    console.error("[API] Erro ao buscar perfil compatível:", err);
     res.status(500).json({ error: "Internal Server Error" });
   }
-});
-
-router.get("/procoach/me", async (_req: Request, res: Response) => {
-  const athleteId = await getOrCreateMonoAthleteId();
-  await ensureAthletesRacesColumn();
-  const rows = await db.execute(sql`SELECT * FROM procoach_athletes WHERE id = ${athleteId} LIMIT 1`) as any;
-  const athlete = rows.rows[0] ?? null;
-  
-  let pointers = { nextRace: null, nextP1: null, anchor: null };
-  if (athlete && athlete.races) {
-    pointers = computeRacePointers(
-      typeof athlete.races === "string" ? JSON.parse(athlete.races) : athlete.races,
-      athlete.macrocycleRaceId ?? athlete.macrocycle_race_id
-    );
-  }
-  res.json({ athlete, pointers });
-});
-
-router.post("/procoach/me/workouts", async (req: Request, res: Response) => {
-  const { date, distanceKm, type, durationMin, week, injuryAlert, rpe, painLevel, notes, shoeId, panelDistanceKm } = req.body as {
-    date: string;
-    distanceKm: number;
-    type: string;
-    durationMin: number;
-    week: number;
-    injuryAlert?: string;
-    rpe?: number;
-    painLevel?: number;
-    notes?: string;
-    shoeId?: number | null;
-    panelDistanceKm?: number | null;
-  };
-
-  const athleteId = await getOrCreateMonoAthleteId();
-  await ensureShoesTables();
-  const entryDate = normalizeEntryDate(date);
-
-  let roundedKm = roundKm(distanceKm);
-  let panelKmToSave: number | null = null;
-
-  if (panelDistanceKm && panelDistanceKm > 0) {
-    panelKmToSave = Number(panelDistanceKm);
-    const planRows = await db.execute(sql`
-      SELECT details_json FROM procoach_plan_sessions
-      WHERE athlete_id = ${athleteId} AND session_date = ${entryDate} LIMIT 1
-    `) as any;
-    const plan = planRows.rows[0];
-    const details = typeof plan?.details_json === "string" ? JSON.parse(plan.details_json) : plan?.details_json;
-    const hiddenKm = details?.treadmillTelemetry?.restTotalKm ? Number(details.treadmillTelemetry.restTotalKm) : 0;
-
-    // Deduz do painel a quilometragem que a lona rolou sozinha (descanso)
-    const bodyKm = panelKmToSave - hiddenKm;
-    roundedKm = roundKm(Math.max(0, bodyKm));
-  }
-
-  const existingEntry = await db
-    .select()
-    .from(workoutEntriesTable)
-    .where(and(eq(workoutEntriesTable.athleteId, athleteId), eq(workoutEntriesTable.entryDate, entryDate)) as any)
-    .limit(1);
-  if (existingEntry[0]) {
-    if (panelKmToSave !== null) {
-      await db.execute(sql`UPDATE procoach_workout_entries SET panel_distance_km = ${panelKmToSave}, distance_km = ${roundedKm} WHERE id = ${existingEntry[0].id}`);
-    }
-    await upsertWorkoutFeedback({ athleteId, entryDate, rpe, painLevel, notes });
-    res.json({ entry: existingEntry[0] });
-    return;
-  }
-
-  const [entry] = await db
-    .insert(workoutEntriesTable)
-    .values({
-      athleteId,
-      entryDate,
-      distanceKm: roundedKm,
-      type: type as any,
-      durationMin,
-      week,
-      shoeId: shoeId ?? null,
-      source: "manual",
-      externalId: null,
-      injuryAlert: injuryAlert ?? null,
-    })
-    .returning();
-
-  if (panelKmToSave !== null) {
-    await db.execute(sql`UPDATE procoach_workout_entries SET panel_distance_km = ${panelKmToSave} WHERE id = ${entry.id}`);
-  }
-
-  await upsertWorkoutFeedback({ athleteId, entryDate, rpe, painLevel, notes });
-
-  const adherence = type === "corrida" && roundedKm >= 3;
-  if (!adherence) {
-    res.json({ entry });
-    return;
-  }
-
-  const existing = await db
-    .select()
-    .from(weeklyStatsTable)
-    .where(and(eq(weeklyStatsTable.athleteId, athleteId), eq(weeklyStatsTable.week, week)) as any)
-    .limit(1);
-
-  if (existing.length === 0) {
-    await db.insert(weeklyStatsTable).values({
-      athleteId,
-      week,
-      completedKm: roundedKm,
-      sessionsCount: 1,
-    });
-  } else {
-    await db
-      .update(weeklyStatsTable)
-      .set({
-        completedKm: existing[0]!.completedKm + roundedKm,
-        sessionsCount: existing[0]!.sessionsCount + 1,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(weeklyStatsTable.athleteId, athleteId), eq(weeklyStatsTable.week, week)));
-  }
-
-  res.json({ entry });
-});
-
-router.post("/procoach/me/workout-feedback", async (req: Request, res: Response) => {
-  const { date, rpe, painLevel, notes } = req.body as {
-    date?: string;
-    rpe?: number;
-    painLevel?: number;
-    notes?: string;
-  };
-
-  const athleteId = await getOrCreateMonoAthleteId();
-  const entryDate = normalizeEntryDate(String(date ?? new Date().toISOString()));
-  await upsertWorkoutFeedback({ athleteId, entryDate, rpe, painLevel, notes });
-  res.json({ ok: true, entryDate });
-});
-
-router.get("/procoach/me/workouts", async (req: Request, res: Response) => {
-  const limitParam = Number(req.query.limit) || 30;
-  const offsetParam = Math.max(0, Number(req.query.offset) || 0);
-  const athleteId = await getOrCreateMonoAthleteId();
-
-  const totalRes = await db.execute(sql`
-    SELECT COUNT(*)::int AS count
-    FROM procoach_workout_entries
-    WHERE athlete_id = ${athleteId}
-  `) as { rows: Array<{ count: number }> };
-  const totalCount = totalRes.rows[0]?.count ?? 0;
-
-  const entries = await db
-    .select()
-    .from(workoutEntriesTable)
-    .where(eq(workoutEntriesTable.athleteId, athleteId) as any)
-    .orderBy(desc(workoutEntriesTable.createdAt) as any)
-    .limit(limitParam)
-    .offset(offsetParam);
-
-  res.json({ entries, totalCount });
-});
-
-router.post("/procoach/me/push-token", async (req: Request, res: Response) => {
-  const { token } = req.body as { token?: string };
-
-  if (!token) {
-    res.status(400).json({ error: "token is required" });
-    return;
-  }
-
-  await getOrCreateMonoAthleteId();
-
-  await db
-    .update(athletesTable)
-    .set({ expoPushToken: token, updatedAt: new Date() })
-    .where(eq(athletesTable.deviceId, MONO_DEVICE_ID) as any);
-
-  res.json({ registered: true });
 });
 
 router.get("/procoach/athletes/:deviceId", async (req: Request, res: Response) => {
@@ -764,16 +403,7 @@ router.get("/procoach/athletes/:deviceId/plan", async (req: Request, res: Respon
       AND (${from ?? null} IS NULL OR session_date >= ${from ?? null})
       AND (${to ?? null} IS NULL OR session_date <= ${to ?? null})
     ORDER BY session_date ASC
-  `) as { rows: Array<{
-    session_date: string;
-    day_name: string | null;
-    activity: string;
-    pace_target: string | null;
-    treadmill_speed: string | null;
-    rest_interval: string | null;
-    structure: string | null;
-    planned_km: number | string;
-  }> };
+  `) as { rows: Array<any> };
 
   res.json({ sessions: rows.rows });
 });
@@ -796,16 +426,7 @@ router.get("/procoach/athletes/:deviceId/plan/today", async (req: Request, res: 
     FROM procoach_plan_sessions
     WHERE athlete_id = ${athleteId} AND session_date = ${date}
     LIMIT 1
-  `) as { rows: Array<{
-    session_date: string;
-    day_name: string | null;
-    activity: string;
-    pace_target: string | null;
-    treadmill_speed: string | null;
-    rest_interval: string | null;
-    structure: string | null;
-    planned_km: number | string;
-  }> };
+  `) as { rows: Array<any> };
 
   let session = rows.rows[0] ? { ...rows.rows[0] } : null;
 
@@ -816,7 +437,6 @@ router.get("/procoach/athletes/:deviceId/plan/today", async (req: Request, res: 
     const suggestTreadmill = rainProb > 70;
     Object.assign(session, { suggestTreadmill, rainProbability: rainProb });
     if (suggestTreadmill && session.treadmill_speed) {
-      // Prioriza Velocidade na esteira ocultando o pace de rua
       session.pace_target = null;
     }
   }
@@ -843,16 +463,7 @@ router.get("/procoach/athletes/:deviceId/plan/next", async (req: Request, res: R
     WHERE athlete_id = ${athleteId} AND session_date > ${from}
     ORDER BY session_date ASC
     LIMIT 1
-  `) as { rows: Array<{
-    session_date: string;
-    day_name: string | null;
-    activity: string;
-    pace_target: string | null;
-    treadmill_speed: string | null;
-    rest_interval: string | null;
-    structure: string | null;
-    planned_km: number | string;
-  }> };
+  `) as { rows: Array<any> };
 
   res.json({ session: rows.rows[0] ?? null });
 });
@@ -1052,20 +663,7 @@ router.post("/procoach/athletes/:deviceId/bioimpedance", async (req: Request, re
       updated_at = NOW()
     RETURNING
       entry_date, weight_kg, body_fat_pct, muscle_mass_kg, body_water_pct, visceral_fat, metabolic_age, tmb_kcal, protein_pct, bone_mass_kg, health_notes, updated_at
-  `) as { rows: Array<{
-    entry_date: string;
-    weight_kg: string | number | null;
-    body_fat_pct: string | number | null;
-    muscle_mass_kg: string | number | null;
-    body_water_pct: string | number | null;
-    visceral_fat: string | number | null;
-    metabolic_age: number | null;
-    tmb_kcal: number | null;
-    protein_pct: string | number | null;
-    bone_mass_kg: string | number | null;
-    health_notes: string | null;
-    updated_at: string;
-  }> };
+  `) as { rows: Array<any> };
 
   res.json({ entry: rows.rows[0] ?? null });
 });
@@ -1184,116 +782,6 @@ router.post("/procoach/athletes/:deviceId/gel-usage", async (req: Request, res: 
   }
 
   res.json({ gelsInStock: after, gelsUsed: used, entryDate, context: ctx });
-});
-
-router.get("/procoach/weather", async (req: Request, res: Response) => {
-  try {
-    const apiKey = process.env.OPENWEATHER_API_KEY;
-    if (!apiKey) {
-      res.status(500).json({ error: "OPENWEATHER_API_KEY não configurada no .env" });
-      return;
-    }
-
-    const lat = req.query.lat ? Number(req.query.lat) : -23.6087;
-    const lon = req.query.lon ? Number(req.query.lon) : -46.6676;
-
-    const currentUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric`;
-    const forecastUrl = `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric`;
-
-    const [currRes, foreRes] = await Promise.all([fetch(currentUrl), fetch(forecastUrl)]);
-    
-    if (!currRes.ok || !foreRes.ok) {
-      res.status(502).json({ error: "Weather API error" });
-      return;
-    }
-    
-    const currData = await currRes.json() as any;
-    const foreData = await foreRes.json() as any;
-
-    const todayISO = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
-    let min = currData.main?.temp_min ?? 999;
-    let max = currData.main?.temp_max ?? -999;
-    let pop = 0;
-
-    for (const item of foreData.list || []) {
-      if (item.dt_txt.startsWith(todayISO)) {
-        min = Math.min(min, item.main.temp_min);
-        max = Math.max(max, item.main.temp_max);
-        pop = Math.max(pop, item.pop);
-      }
-    }
-
-    const nowSec = Math.floor(Date.now() / 1000);
-    const isDay = nowSec >= currData.sys?.sunrise && nowSec <= currData.sys?.sunset ? 1 : 0;
-
-    res.json({
-      temperature: currData.main?.temp ? Math.round(currData.main.temp) : null,
-      weathercode: mapOpenWeatherToWMO(currData.weather?.[0]?.id || 800),
-      windspeed: currData.wind?.speed ? Math.round(currData.wind.speed * 3.6) : null,
-      is_day: isDay,
-      min: min !== 999 ? Math.round(min) : null,
-      max: max !== -999 ? Math.round(max) : null,
-      rainProbability: Math.round(pop * 100)
-    });
-  } catch (err) {
-    console.error("Erro ao buscar clima:", err);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-});
-
-router.get("/procoach/weather", async (req: Request, res: Response) => {
-  try {
-    const apiKey = process.env.OPENWEATHER_API_KEY;
-    if (!apiKey) {
-      res.status(500).json({ error: "OPENWEATHER_API_KEY não configurada no .env" });
-      return;
-    }
-
-    const lat = req.query.lat ? Number(req.query.lat) : -23.6087;
-    const lon = req.query.lon ? Number(req.query.lon) : -46.6676;
-
-    const currentUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric`;
-    const forecastUrl = `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric`;
-
-    const [currRes, foreRes] = await Promise.all([fetch(currentUrl), fetch(forecastUrl)]);
-    
-    if (!currRes.ok || !foreRes.ok) {
-      res.status(502).json({ error: "Weather API error" });
-      return;
-    }
-    
-    const currData = await currRes.json() as any;
-    const foreData = await foreRes.json() as any;
-
-    const todayISO = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
-    let min = currData.main?.temp_min ?? 999;
-    let max = currData.main?.temp_max ?? -999;
-    let pop = 0;
-
-    for (const item of foreData.list || []) {
-      if (item.dt_txt.startsWith(todayISO)) {
-        min = Math.min(min, item.main.temp_min);
-        max = Math.max(max, item.main.temp_max);
-        pop = Math.max(pop, item.pop);
-      }
-    }
-
-    const nowSec = Math.floor(Date.now() / 1000);
-    const isDay = nowSec >= currData.sys?.sunrise && nowSec <= currData.sys?.sunset ? 1 : 0;
-
-    res.json({
-      temperature: currData.main?.temp ? Math.round(currData.main.temp) : null,
-      weathercode: mapOpenWeatherToWMO(currData.weather?.[0]?.id || 800),
-      windspeed: currData.wind?.speed ? Math.round(currData.wind.speed * 3.6) : null,
-      is_day: isDay,
-      min: min !== 999 ? Math.round(min) : null,
-      max: max !== -999 ? Math.round(max) : null,
-      rainProbability: Math.round(pop * 100)
-    });
-  } catch (err) {
-    console.error("Erro ao buscar clima:", err);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
 });
 
 export default router;

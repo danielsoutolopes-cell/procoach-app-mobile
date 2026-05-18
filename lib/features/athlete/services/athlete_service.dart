@@ -45,4 +45,9 @@ class AthleteService {
     final response = await _dio.post('/procoach/me/race-strategy', data: {'raceName': raceName});
     return response.data['strategy'] as String;
   }
+
+  /// Salva o resultado de uma prova concluída (tempo, pace, clima)
+  Future<void> saveRaceResult(String raceId, Map<String, dynamic> resultData) async {
+    await _dio.post('/procoach/races/$raceId/result', data: resultData);
+  }
 }

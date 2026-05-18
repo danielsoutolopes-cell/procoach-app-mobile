@@ -77,4 +77,16 @@ class AthleteNotifier extends AsyncNotifier<Athlete> {
       throw Exception('Falha ao definir âncora: $e');
     }
   }
+
+  /// Salva o resultado de uma prova concluída
+  Future<void> saveRaceResult(String raceId, Map<String, dynamic> resultData) async {
+    try {
+      final athleteService = ref.read(athleteServiceProvider);
+      await athleteService.saveRaceResult(raceId, resultData);
+      // Recarrega o estado do atleta para exibir o novo resultado na lista
+      ref.invalidateSelf();
+    } catch (e) {
+      throw Exception('Falha ao salvar resultado: $e');
+    }
+  }
 }

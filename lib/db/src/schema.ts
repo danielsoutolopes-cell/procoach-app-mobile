@@ -33,3 +33,22 @@ export const shoes = pgTable('procoach_shoes', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
+
+export const procoachRaces = pgTable('procoach_races', {
+  id: serial('id').primaryKey(),
+  athleteId: integer('athlete_id').notNull(), // FK para a tabela de atletas
+
+  name: varchar('name', { length: 255 }).notNull(),
+  date: varchar('date', { length: 32 }), // YYYY-MM-DD
+  distancia: real('distancia'), // ex: 10, 21, 42.195
+  type: varchar('type', { length: 50 }), // ex: P1, P2, P3
+  isAnchor: integer('is_anchor').default(0), // 0 ou 1
+
+  // --- NOVAS COLUNAS PARA RESULTADOS ---
+  finishTime: varchar('finish_time', { length: 20 }), // ex: "58:07"
+  finishPace: varchar('finish_pace', { length: 20 }), // ex: "5:48/km"
+  weatherCondition: varchar('weather_condition', { length: 100 }), // ex: "☀️ 22°C"
+
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});

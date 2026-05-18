@@ -40,8 +40,8 @@ class ScaffoldWithNavBar extends StatelessWidget {
             label: 'Plano',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.insights),
-            label: 'Status',
+            icon: Icon(Icons.build_circle_outlined),
+            label: 'Manutenção',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.event_available),

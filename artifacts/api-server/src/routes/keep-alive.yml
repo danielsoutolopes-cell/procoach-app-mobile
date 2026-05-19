@@ -1,0 +1,16 @@
+name: Keep Render Alive
+
+on:
+  schedule:
+    # Executa a cada 14 minutos entre 06:00 e 22:59 no fuso horário de São Paulo (BRT).
+    # Como o GitHub Actions usa UTC, e BRT é UTC-3:
+    # 06:00 BRT = 09:00 UTC | 22:59 BRT = 01:59 UTC do dia seguinte.
+    - cron: '*/14 0-1,9-23 * * *'
+  workflow_dispatch: # Permite disparar manualmente para testes
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping API Health
+        run: curl -sSf https://coach-pro-4sys.onrender.com/api/health

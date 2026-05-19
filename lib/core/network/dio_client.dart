@@ -10,7 +10,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 final dioProvider = Provider<Dio>((ref) {
   // TODO: A URL base será lida dinamicamente do SharedPreferences.
   // Puxa do .env, com fallback para segurança
-  final baseUrl = dotenv.env['API_URL'] ?? 'https://coach-pro-v8e4.onrender.com/api/procoach';
+  final baseUrl = dotenv.env['API_URL'] ?? 'https://coach-pro-4sys.onrender.com/api/procoach';
 
   final options = BaseOptions(
     baseUrl: baseUrl,

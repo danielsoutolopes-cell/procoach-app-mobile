@@ -100,7 +100,7 @@ Criar workflow:
 - `.github/workflows/telegram-nightly.yml`
 - Cron diário em UTC equivalente a 22:00 São Paulo
 - Executa `curl`:
-  - `POST https://coach-pro-v8e4.onrender.com/api/telegram/nightly`
+  - `POST https://coach-pro-4sys.onrender.com/api/telegram/nightly`
   - header `x-cron-secret: ${{ secrets.TELEGRAM_CRON_SECRET }}`
 
 Observação:
@@ -116,4 +116,3 @@ Permitir disparo manual via workflow_dispatch no GitHub Actions para testes.
 - “Macrociclo (âncora)” dita a semana/fase exibida no app.
 - Histórico e Compliance param de contar bike/caminhada e corridas < 3km.
 - Telegram envia briefing 22h diariamente via Actions (com execução manual de teste).
-

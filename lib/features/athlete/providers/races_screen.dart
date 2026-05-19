@@ -189,9 +189,13 @@ class RacesScreen extends ConsumerWidget {
                         Navigator.of(context).pop();
                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Salvando resultado...')));
                         try {
-                          await ref.read(athleteProvider.notifier).saveRaceResult(raceId, resultData);
+                          final isNewPR = await ref.read(raceControllerProvider).saveRaceResult(raceId, resultData);
                           if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Resultado salvo com sucesso!'), backgroundColor: Colors.green));
+                            if (isNewPR) {
+                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('🏆 NOVO RECORDE PESSOAL! PARABÉNS!'), backgroundColor: Colors.deepOrangeAccent, duration: Duration(seconds: 4)));
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Resultado salvo com sucesso!'), backgroundColor: Colors.green));
+                            }
                           }
                         } catch (e) {
                           if (context.mounted) {
@@ -334,7 +338,7 @@ class RacesScreen extends ConsumerWidget {
                     activeColor: Colors.greenAccent,
                     onChanged: (val) {
                       if (val) {
-                        ref.read(athleteProvider.notifier).setMacrocycleAnchor(raceId);
+                        ref.read(raceControllerProvider).setMacrocycleAnchor(raceId);
                       }
                     },
                   ),

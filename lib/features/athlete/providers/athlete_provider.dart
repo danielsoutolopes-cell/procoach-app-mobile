@@ -3,8 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:procoach_os/features/athlete/services/athlete_service.dart';
 import 'package:procoach_os/shared/models/athlete.dart';
 
-/// O AsyncNotifierProvider substitui o Context + useEffect do React Native.
-/// Ele gerencia automaticamente a transição de Loading -> Data (ou Error).
+/// O AsyncNotifierProvider principal, focado APENAS em manter o estado do Atleta.
 final athleteProvider = AsyncNotifierProvider<AthleteNotifier, Athlete>(() {
   return AthleteNotifier();
 });
@@ -12,28 +11,57 @@ final athleteProvider = AsyncNotifierProvider<AthleteNotifier, Athlete>(() {
 class AthleteNotifier extends AsyncNotifier<Athlete> {
   @override
   FutureOr<Athlete> build() async {
-    // O `ref.watch` cria uma ligação reativa com o nosso serviço.
     final athleteService = ref.watch(athleteServiceProvider);
-    
-    // Como o app é mono-usuário, podemos usar um ID fixo ou deixar que o backend 
-    // (Neon/Node) resolva o "Primary Athlete" automaticamente através da chave "mono".
     const monoAthleteId = 'mono'; 
-    
-    // Faz a chamada à API e retorna o Atleta. 
-    // O Riverpod coloca o estado como AsyncLoading() automaticamente enquanto aguarda!
     return await athleteService.getAthleteProfile(monoAthleteId);
   }
 
-  /// Exemplo Prático: Atualizar o estoque de géis (UX "Visual-First, Input-Light")
-  /// Usamos o padrão de "Atualização Otimista" para o app parecer instantâneo.
+  /// Permite que Controllers específicos façam atualizações otimistas no estado global.
+  void setOptimisticState(Athlete newState) {
+    state = AsyncData(newState);
+  }
+
+  /// Permite Rollback em caso de falha na API.
+  void rollbackState(AsyncValue<Athlete> previousState) {
+    state = previousState;
+  }
+
+  // =======================================================================
+  // MÉTODOS LEGADOS (Delegando para os novos Controllers para manter retrocompatibilidade)
+  // =======================================================================
+
+  @Deprecated('Use ref.read(inventoryControllerProvider).updateGelInventory')
+  Future<void> updateGelInventory(int newAmount) => 
+      ref.read(inventoryControllerProvider).updateGelInventory(newAmount);
+
+  @Deprecated('Use ref.read(raceControllerProvider).addRace')
+  Future<void> addRace(Map<String, dynamic> raceData) => 
+      ref.read(raceControllerProvider).addRace(raceData);
+
+  @Deprecated('Use ref.read(raceControllerProvider).setMacrocycleAnchor')
+  Future<void> setMacrocycleAnchor(String raceId) => 
+      ref.read(raceControllerProvider).setMacrocycleAnchor(raceId);
+
+  @Deprecated('Use ref.read(raceControllerProvider).saveRaceResult')
+  Future<bool> saveRaceResult(String raceId, Map<String, dynamic> resultData) => 
+      ref.read(raceControllerProvider).saveRaceResult(raceId, resultData);
+}
+
+/// Controller focado exclusivamente na gestão de Inventário (Géis, Tênis, etc).
+final inventoryControllerProvider = Provider((ref) => InventoryController(ref));
+
+class InventoryController {
+  final Ref _ref;
+  InventoryController(this._ref);
+
   Future<void> updateGelInventory(int newAmount) async {
-    final previousState = state; // Guarda o estado atual para possível Rollback
-    final currentAthlete = state.value;
+    final athleteNotifier = _ref.read(athleteProvider.notifier);
+    final previousState = _ref.read(athleteProvider);
+    final currentAthlete = previousState.value;
     
     if (currentAthlete == null) return;
 
-    // 1. Atualização Otimista: Atualiza a UI imediatamente antes de ir à API
-    state = AsyncData(
+    athleteNotifier.setOptimisticState(
       Athlete(
         id: currentAthlete.id,
         name: currentAthlete.name,
@@ -43,48 +71,81 @@ class AthleteNotifier extends AsyncNotifier<Athlete> {
     );
 
     try {
-      // 2. Chamada real à API usando o serviço
-      final athleteService = ref.read(athleteServiceProvider);
-      await athleteService.updateGelInventory(currentAthlete.id, newAmount);
-    } catch (error, stackTrace) {
-      // 3. Rollback: Se a internet falhar, desfazemos a alteração na UI silenciosamente
-      state = previousState;
+      await _ref.read(athleteServiceProvider).updateGelInventory(currentAthlete.id, newAmount);
+    } catch (error) {
+      athleteNotifier.rollbackState(previousState);
+      throw Exception('Falha ao atualizar inventário: $error');
     }
   }
+}
 
-  /// Adiciona uma nova prova ao calendário do atleta
+/// Controller focado exclusivamente na gestão de Provas (Races e Resultados).
+final raceControllerProvider = Provider((ref) => RaceController(ref));
+
+class RaceController {
+  final Ref _ref;
+  RaceController(this._ref);
+
   Future<void> addRace(Map<String, dynamic> raceData) async {
     try {
-      final athleteService = ref.read(athleteServiceProvider);
-      // Envia a requisição vinculada ao dispositivo primário "mono"
-      await athleteService.addRace('mono', raceData);
-      // Força a recarga do Provider, atualizando os ponteiros e listas do Dashboard automaticamente
-      ref.invalidateSelf();
+      await _ref.read(athleteServiceProvider).addRace('mono', raceData);
+      _ref.invalidate(athleteProvider);
     } catch (e) {
       throw Exception('Falha ao cadastrar a prova: $e');
     }
   }
 
-  /// Define a prova âncora do macrociclo
   Future<void> setMacrocycleAnchor(String raceId) async {
     try {
-      final athleteService = ref.read(athleteServiceProvider);
-      // Envia a requisição vinculada ao dispositivo primário "mono"
-      await athleteService.setMacrocycleAnchor('mono', raceId);
-      // Recarrega o estado do atleta para que todo o app se reajuste ao novo macrociclo
-      ref.invalidateSelf();
+      await _ref.read(athleteServiceProvider).setMacrocycleAnchor('mono', raceId);
+      _ref.invalidate(athleteProvider);
     } catch (e) {
       throw Exception('Falha ao definir âncora: $e');
     }
   }
 
-  /// Salva o resultado de uma prova concluída
-  Future<void> saveRaceResult(String raceId, Map<String, dynamic> resultData) async {
+  Future<bool> saveRaceResult(String raceId, Map<String, dynamic> resultData) async {
     try {
-      final athleteService = ref.read(athleteServiceProvider);
-      await athleteService.saveRaceResult(raceId, resultData);
-      // Recarrega o estado do atleta para exibir o novo resultado na lista
-      ref.invalidateSelf();
+      bool isNewPR = false;
+      final currentAthlete = _ref.read(athleteProvider).value;
+
+      if (currentAthlete != null) {
+        final races = currentAthlete.races;
+        final currentRace = races.firstWhere((r) => r['id'].toString() == raceId, orElse: () => {});
+
+        if (currentRace.isNotEmpty && resultData['finishTime'] != null) {
+          final distance = double.tryParse(currentRace['distancia']?.toString() ?? '0') ?? 0;
+          final newTimeStr = resultData['finishTime'] as String;
+
+          int timeToSec(String t) {
+            final p = t.split(':');
+            if (p.length == 2) return (int.tryParse(p[0]) ?? 0) * 60 + (int.tryParse(p[1]) ?? 0);
+            if (p.length == 3) return (int.tryParse(p[0]) ?? 0) * 3600 + (int.tryParse(p[1]) ?? 0) * 60 + (int.tryParse(p[2]) ?? 0);
+            return 999999; 
+          }
+
+          final newSec = timeToSec(newTimeStr);
+          int bestPreviousSec = 999999;
+
+          for (var r in races) {
+            if (r['id'].toString() == raceId) continue;
+            final d = double.tryParse(r['distancia']?.toString() ?? '0') ?? 0;
+            if ((d - distance).abs() <= 0.5) { 
+              final t = r['finishTime'];
+              if (t != null && t != '--:--') {
+                final sec = timeToSec(t.toString());
+                if (sec < bestPreviousSec) bestPreviousSec = sec;
+              }
+            }
+          }
+          if (newSec < bestPreviousSec) isNewPR = true;
+        }
+      }
+
+      await _ref.read(athleteServiceProvider).saveRaceResult(raceId, resultData);
+      _ref.invalidate(athleteProvider);
+      
+      return isNewPR;
     } catch (e) {
       throw Exception('Falha ao salvar resultado: $e');
     }
